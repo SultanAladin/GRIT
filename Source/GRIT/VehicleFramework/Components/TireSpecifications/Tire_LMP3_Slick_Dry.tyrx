@@ -1,0 +1,144 @@
+# Tire_LMP3_Slick_Dry.tyrx
+## META_BLOCK [Lines 1-4]
+format_version: 1.0
+tire_class: LMP3_SLICK_DRY
+manufacturer: MICHELIN
+compound: ENDURANCE_SLICK
+surface: DRY_ASPHALT
+
+## GEOMETRY_BLOCK [Lines 5-11]
+outer_radius: 0.340              # [m] - Outer tire radius
+inner_radius: 0.228              # [m] - Inner rim radius
+width: 0.300                     # [m] - Tire contact patch width
+tire_mass: 10.8                  # [kg] - Tire mass
+rim_mass: 9.0                    # [kg] - Rim mass
+inertia: 0.49                    # [kg⋅m²] - Rotational inertia
+
+## TRACTION_BLOCK [Lines 12-15]
+peak_longitudinal_friction: 1.88 # [μ] - Peak friction coefficient Fx
+peak_lateral_friction: 1.92      # [μ] - Peak friction coefficient Fy
+relaxation_length_long: 0.075    # [m] - Longitudinal slip relaxation
+relaxation_length_lat: 0.068     # [m] - Lateral slip relaxation
+
+## ROLLING_RESISTANCE_BLOCK [Lines 16-17]
+constant: 0.0078                 # [N] - Base rolling resistance
+velocity_factor: 0.00011         # [N⋅s⋅m⁻¹] - Velocity-dependent factor
+
+## THERMAL_BLOCK [Lines 18-23]
+tread_thermal_mass: 410.0        # [J⋅K⁻¹] - Tread heat capacity
+carcass_thermal_mass: 780.0      # [J⋅K⁻¹] - Carcass heat capacity
+tread_carcass_conduction: 20.0   # [W⋅K⁻¹] - Conduction coefficient
+convection_coeff: 50.0           # [W⋅m⁻²⋅K⁻¹] - Convection coefficient
+optimal_temp: 370.15             # [K] - Optimal operating temperature (97°C)
+overheat_temp: 413.15            # [K] - Overheat threshold (140°C)
+grip_temp_sensitivity: 0.020     # [K⁻¹] - Grip temperature coefficient
+
+## STRUCTURAL_BLOCK [Lines 24-29]
+nominal_pressure: 180000.0       # [Pa] - Nominal tire pressure (1.80 bar)
+min_pressure: 160000.0           # [Pa] - Minimum safe pressure (1.60 bar)
+max_pressure: 210000.0           # [Pa] - Maximum safe pressure (2.10 bar)
+tensile_sidewall_strength: 0.0   # [Pa] - Sidewall tensile strength (not specified)
+tensile_tread_strength: 0.0      # [Pa] - Tread tensile strength (not specified)
+pressure_stiffness_gain: 0.26    # [Pa⁻¹] - Stiffness pressure coefficient
+
+## WEAR_BLOCK [Lines 30-34]
+initial_tread_depth: 0.0         # [mm] - Initial tread depth (not specified)
+base_wear_rate: 0.0              # [mm⋅s⁻¹] - Base wear rate (not specified)
+thermal_wear_multiplier: 0.0     # [-] - Temperature wear multiplier (not specified)
+load_wear_exponent: 0.0          # [-] - Load-dependent wear exponent (not specified)
+grip_loss_per_mm: 0.0            # [μ⋅mm⁻¹] - Grip loss per mm wear (not specified)
+
+## AQUAPLANING_BLOCK [Lines 35-37]
+hydroplaning_coeff: 0.0          # [m⋅s⁻¹⋅Pa⁻⁰·⁵] - Hydroplaning coefficient (not specified)
+drainage_efficiency: 0.0         # [%] - Water drainage (0% for slicks)
+wet_friction_base: 0.0           # [μ] - Wet surface friction multiplier (not specified)
+
+## PACEJKA_GLOBAL_BLOCK [Lines 38-44]
+fz0: 5.9                         # [kN] - Nominal vertical load
+lx: 1.0                          # [-] - Longitudinal scale factor
+ly: 1.05                         # [-] - Lateral scale factor
+ltr: 0.0                         # [-] - Aligning torque scale factor (not specified)
+mu_load_sensitivity_lat: 0.16    # [kN⁻¹] - Lateral μ load sensitivity
+mu_load_sensitivity_long: 0.12   # [kN⁻¹] - Longitudinal μ load sensitivity
+mu_load_min_factor: 0.60         # [-] - Minimum friction factor at high load
+
+## PACEJKA_FX_BLOCK [Lines 45-58]
+pbx1: 23.8                       # [kN⁻¹] - Longitudinal B factor load influence
+pbx2: 0.0                        # [-] - Longitudinal B factor slip influence (not specified)
+pbx3: 0.0                        # [rad⁻¹] - Longitudinal B factor camber influence (not specified)
+pcx1: 1.75                       # [-] - Longitudinal C shape factor
+pdx1: 1.88                       # [μ] - Longitudinal peak friction factor
+pdx2: -0.070                     # [kN⁻¹] - Longitudinal D load factor
+pdx3: 0.0                        # [rad⁻²] - Longitudinal D camber factor (not specified)
+pex1: -0.14                      # [-] - Longitudinal E curvature base
+pex2: 0.0                        # [kN⁻¹] - Longitudinal E load factor (not specified)
+pex3: 0.0                        # [-] - Longitudinal E slip factor (not specified)
+pex4: 0.040                      # [-] - Longitudinal E sign factor
+phx1: 0.0                        # [-] - Horizontal shift SHx base
+phx2: 0.0                        # [kN⁻¹] - Horizontal shift SHx load factor
+pvx1: 0.0                        # [-] - Vertical shift SVx base
+pvx2: 0.0                        # [kN⁻¹] - Vertical shift SVx load factor
+
+## PACEJKA_FY_BLOCK [Lines 59-77]
+pby1: 20.5                       # [kN⁻¹] - Lateral B factor load influence
+pby2: 15.8                       # [-] - Lateral B factor slip influence
+pby3: 0.0                        # [rad⁻¹] - Lateral B factor camber influence (not specified)
+pcy1: 1.75                       # [-] - Lateral C shape factor
+pdy1: 1.86                       # [μ] - Lateral peak friction factor
+pdy2: -0.10                      # [kN⁻¹] - Lateral D load factor
+pdy3: 0.16                       # [rad⁻²] - Lateral D camber squared factor
+pey1: -1.42                      # [-] - Lateral E curvature base
+pey2: -0.62                      # [kN⁻¹] - Lateral E load factor
+pey3: 0.30                       # [-] - Lateral E slip factor
+pey4: 0.0                        # [-] - Lateral E sign factor
+phy1: 0.0                        # [-] - Horizontal shift SHy base (not specified)
+phy2: 0.0                        # [kN⁻¹] - Horizontal shift SHy load factor
+pvy1: 0.0                        # [kN⋅rad⁻¹] - Vertical shift SVy base
+pvy2: 0.0                        # [kN²⋅rad⁻¹] - Vertical shift SVy load factor
+pvy3: 0.0                        # [rad⁻¹] - Vertical shift SVy camber factor
+pvy4: 0.0                        # [kN⋅rad⁻²] - Vertical shift SVy load-camber factor
+
+## PACEJKA_CAMBER_BLOCK [Lines 78-79]
+pcamber1: 0.20                   # [rad⁻¹] - Camber thrust coefficient
+pcamber2: -0.08                  # [kN⁻¹⋅rad⁻¹] - Camber thrust load sensitivity
+
+## PACEJKA_MZ_BLOCK [Lines 80-93]
+qbz1: 0.0                        # [kN⁻¹⋅rad⁻¹] - Trail B factor base (not specified)
+qbz2: 0.0                        # [kN⁻²⋅rad⁻¹] - Trail B load factor (not specified)
+qbz3: 0.0                        # [kN⁻²⋅rad²] - Trail B load-slip squared (not specified)
+qbz5: 0.0                        # [rad⁻¹] - Trail B camber influence (not specified)
+qcz1: 0.0                        # [-] - Trail C shape factor (not specified)
+qdz1: 0.0                        # [m⋅rad⁻¹] - Trail D base (not specified)
+qdz2: 0.0                        # [m⋅kN⁻¹⋅rad⁻¹] - Trail D load factor (not specified)
+qdz3: 0.0                        # [m⋅rad⁻²] - Trail D camber factor (not specified)
+qez1: 0.0                        # [m⋅rad⁻¹] - Trail E base (not specified)
+qez2: 0.0                        # [m⋅kN⁻¹⋅rad⁻¹] - Trail E load factor (not specified)
+qez3: 0.0                        # [m⋅rad⁻²] - Trail E camber factor (not specified)
+qez4: 0.0                        # [-] - Trail E slip curvature (not specified)
+qez5: 0.0                        # [-] - Trail E sign factor (not specified)
+
+## PACEJKA_COMBINED_FX_BLOCK [Lines 94-100]
+rbx1: 19.2                       # [kN⁻¹] - Combined slip Fx B factor
+rbx2: 0.0                        # [rad⁻¹] - Combined slip Fx B slip angle (not specified)
+rbx3: 0.0                        # [-] - Combined slip Fx B curvature
+rcx1: 1.25                       # [-] - Combined slip Fx C shape
+rex1: 0.0                        # [-] - Combined slip Fx E base
+rex2: 0.0                        # [kN⁻¹] - Combined slip Fx E load (not specified)
+rhx1: 0.0                        # [-] - Combined slip Fx shift (not specified)
+
+## PACEJKA_COMBINED_FY_BLOCK [Lines 101-115]
+rby1: 15.5                       # [kN⁻¹] - Combined slip Fy B factor
+rby2: -3.8                       # [rad⁻¹] - Combined slip Fy B slip ratio
+rby3: 0.0                        # [-] - Combined slip Fy B camber
+rby4: 0.0                        # [rad⁻¹⋅kN⁻¹] - Combined slip Fy B load-camber
+rcy1: 1.28                       # [-] - Combined slip Fy C shape
+rey1: 0.0                        # [-] - Combined slip Fy E base
+rey2: 0.0                        # [kN⁻¹] - Combined slip Fy E load
+rhy1: 0.0                        # [-] - Combined slip Fy horizontal shift (not specified)
+rhy2: 0.0                        # [kN⁻¹] - Combined slip Fy shift load
+rvy1: 0.10                       # [kN⁻¹] - Combined slip Fy vertical shift
+rvy2: 0.0                        # [kN⁻²] - Combined slip Fy shift load
+rvy3: 0.0                        # [rad⁻¹] - Combined slip Fy shift slip angle
+rvy4: 0.0                        # [kN⋅rad⁻¹] - Combined slip Fy shift camber
+rvy5: 2.3                        # [-] - Combined slip Fy shift curvature
+rvy6: 0.0                        # [kN⋅rad⁻¹] - Combined slip Fy shift load-camber

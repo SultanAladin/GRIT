@@ -1,0 +1,111 @@
+ENGINEERING MANDATE & FORMATTING PROTOCOL
+ABSOLUTE DIRECTIVES
+COMPLIANCE MANDATORY: All AI assistance must strictly adhere to the requirements outlined in this document. No deviations, simplifications, or compromises are permitted.
+ENGINEERING GRADE SOLUTIONS: All implementations, algorithms, and solutions must meet industrial simulation standards. Accuracy, stability, and predictive validity are non-negotiable across all operating conditions.
+REALISM ABSOLUTE: Under no circumstances shall realism be compromised for simplified gameplay, ease of implementation, or non-physical approximations. All systems must adhere strictly to verifiable physical and engineering principles.
+
+CODE FORMATTING STANDARDS
+Header File (.h) Function Declarations
+REQUIRED FORMAT: Single-line compact style with inline documentation
+cpp/** Vehicle preset initialization */
+void initializeDefaultVehiclePreset(int32 PresetID);
+PROHIBITED FORMAT: Multi-line verbose doxygen style
+cpp// DO NOT USE THIS FORMAT
+/**
+ * @brief Computes longitudinal tire force
+ * @param Member The axle member
+ * @return Longitudinal force
+ */
+float ComputeLongitudinalForce(const FAxleMember& Member, float SlipRatio);
+RULE: Function signature and all arguments on ONE line. Units shown in comment, not in parameter documentation.
+
+Variable Documentation - Physics Units
+REQUIRED FORMAT: Inline unit notation with proper mathematical symbols
+cppFVector TotalLateralForce;  // [N] - Total lateral acceleration force
+float Bx = Kx / (Cx * (Dx + 1e-3f));  // [N⁻¹] (kg⁻¹⋅m⁻¹⋅s²)
+REQUIREMENTS:
+
+Use proper mathematical superscripts/subscripts (⁻¹, ⋅, ², etc.)
+Include derived unit breakdowns in parentheses when helpful
+Keep units physically accurate and dimensionally consistent
+Place unit comment on same line as variable declaration
+
+
+Conditional Statements - Reasoning & Closure
+REQUIRED FORMAT: Reason stated at opening, closure identification at end
+cpp// Check if suspension torque exists before applying
+if (SuspensionConfig.TotalTorqueRad.SizeSquared() > UE_SMALL_NUMBER)
+{
+    VehicleHull->AddTorqueInRadians(SuspensionConfig.TotalTorqueRad);
+} // End if (TotalTorqueRad check)
+REQUIREMENTS:
+
+Comment explaining the logical reason BEFORE the if statement
+Closing comment identifying which conditional is ending
+Nested conditionals must clearly identify their closure points
+
+
+Code Density - Single Line Logic
+PREFERRED: Compact single-line statements
+cppDrawDebugLine(World, WheelWorldLocation, WheelWorldLocation + VelScale, FColor::White, false, -1.0f, 0, 2.0f);
+AVOID: Unnecessarily verbose multi-line formatting
+cpp// DO NOT USE THIS STYLE
+if (GEngine)
+{
+    GEngine->AddOnScreenDebugMessage(
+        1, 1.5f, FColor::Yellow,
+        FString::Printf(TEXT("Throttle: %.3f"), Result)
+    );
+}
+RULE: If logic fits reasonably on one line, keep it on one line. Prioritize code density without sacrificing readability.
+
+Function Naming Convention
+REQUIREMENTS:
+
+Technical, short, and catchy
+NO generic internet-sourced names
+NO Greek-themed terminology
+NO sci-fi references
+NO geeky/nerdy/lame conventions
+NO space-themed naming
+NO overly scientific jargon
+
+ACCEPTABLE STYLE: Precise engineering terminology that is memorable and distinctive
+
+Section Dividers
+MAJOR SECTION FORMAT:
+cpp//------------------------------------------------------------------------------
+//                                    suspension pipeline
+//------------------------------------------------------------------------------
+COMMENT BLOCK FORMAT:
+cpp//------------------------------------------------------------------------------
+// Tire slip calculation
+// Computing longitudinal and lateral slip ratios
+// Using modified Pacejka coefficients
+//------------------------------------------------------------------------------
+REQUIREMENTS:
+
+78-character width for divider lines
+Section titles centered or left-aligned as appropriate
+Comment blocks use same divider style for visual consistency
+
+
+PERFORMANCE & CODE QUALITY MANDATES
+PERFORMANCE PRIORITY: All code must be optimized for maximum speed and minimal computational overhead. Performance is a top-level design constraint.
+CODE PRACTICE PROHIBITION: Strictly forbidden from utilizing, mimicking, or copying poor coding practices, legacy implementations, or substandard code structures. Readability, maintainability, and efficiency are paramount.
+TELEMETRY PROTOCOL: CSV logging is mandatory for performance-critical telemetry data capture to bypass overhead of standard logging systems.
+
+CONFLICT RESOLUTION PROTOCOL
+PHYSICS DEVIATION WARNING: If any directive or assumption violates established vehicle dynamics, thermodynamics, or engineering principles, AI SHALL immediately halt and issue explicit warning.
+WARNING CONTENT MUST INCLUDE:
+
+Physical principle being compromised
+Potential adverse effects on realism or stability
+Correct engineering principle that should be followed
+
+CONFIRMATION REQUIRED: NO CHANGE will be made until explicit user confirmation is received acknowledging the compromise.
+
+EXECUTION PARAMETERS
+KNOWLEDGE BASE: AI must analyze all provided code, documentation, and reference implementations to ensure engineering superiority and avoid known compromises.
+OPERATIONAL STATE: This mandate is now active. All subsequent interactions are governed by these terms without exception.
+ZERO COMPROMISE: Realism, performance, and engineering accuracy are absolute priorities. No shortcuts, approximations, or simplified implementations are acceptable.

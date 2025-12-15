@@ -1,0 +1,28 @@
+# Unreal Engine .gitignore
+# Only track: Source/, Config/, Content/, and *.uproject
+
+# Ignore everything by default
+*
+
+# Allow these folders
+!Source/
+!Source/**
+!Config/
+!Config/**
+!Content/
+!Content/**
+
+# Allow project file
+!*.uproject
+
+# Allow .gitignore itself
+!.gitignore
+
+# Ignore binaries and build artifacts even in tracked folders
+*.dll
+*.exe
+*.pdb
+*.lib
+*.a
+*.so
+*.dylib
