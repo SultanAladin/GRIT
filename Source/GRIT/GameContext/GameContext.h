@@ -51,7 +51,7 @@ private:
     void MarkControllerDeployed(APlayerController* Controller);
     void PurgeInvalidDeployedControllers();
 
-private:
+protected:
     UPROPERTY(EditAnywhere, Category = "Spawning")
     ESpawnStrategy SpawnStrategy;
 

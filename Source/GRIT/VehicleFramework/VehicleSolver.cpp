@@ -3,15 +3,12 @@
 // Physics-thread suspension, anti-rollbar, and load transfer implementation
 //====================================================================================================================================================
 #include "VehicleSolver.h"
-#include "Net/UnrealNetwork.h"
 #include "TireConstruct.h"
 
 namespace
 {
     constexpr float GravityM = 9.80f;                                    // [m⋅s⁻²] - Gravitational acceleration
 } // End anonymous namespace
-
-
 
 /*====================================================================================================================================================
                                                                     CONSTRUCTOR
@@ -46,64 +43,6 @@ AVehicleSolver::AVehicleSolver()
 void AVehicleSolver::BeginPlay()
 {
     Super::BeginPlay();
-
-#if P2P
-    //--------------------------------------------------------------------------
-    // P2P AUTHORITY SPLIT
-    //--------------------------------------------------------------------------
-    if (HasPhysicsAuthority()) // Reason: host/server runs full physics simulation
-    {
-        // HOST PATH: Full physics simulation
-        ApplyPacejkaPlySteerSymmetry();
-        GenerateTrajectoryAtlas();                                       // Generate multi-ray trace patterns for suspension
-        CalibrateSuspensionAssembly();                                   // Compute spring rates and rest lengths
-        CalibrateSteeringAssembly();                                     // Initialize steering parameters
-        ApplyEquilibriumTransform();                                     // Position vehicle at correct ride height on ground
-        InitializePhysics();                                             // Register physics callback with Chaos solver
-        InitializeDrivetrain_GameThread();                               // Initialize powertrain system
-        InitializeAerodynamics_GameThread();                             // Initialize aerodynamics system
-
-        if (VehicleHull) // Reason: ensure physics simulation is enabled on host
-        {
-            VehicleHull->SetSimulatePhysics(true);
-        } // End if (VehicleHull)
-
-#if !UE_BUILD_SHIPPING
-        // Initialize static wheel loads for load transfer calculation
-        if (PhysicsCallback)
-        {
-            const int32 WheelCount = Axles_GT.Num();
-            StaticWheelLoads_GT.SetNum(WheelCount);
-            PhysicsCallback->StaticWheelLoads.SetNum(WheelCount);
-
-            const float TotalWeight = VehicleHull ? VehicleHull->GetMass() * 9.80f : 1720.0f * 9.80f;
-            const float StaticLoadPerWheel = TotalWeight / FMath::Max(1, WheelCount);
-
-            for (int32 i = 0; i < WheelCount; ++i)
-            {
-                StaticWheelLoads_GT[i] = StaticLoadPerWheel;
-                PhysicsCallback->StaticWheelLoads[i] = StaticLoadPerWheel;
-            }
-        } // End if (PhysicsCallback)
-#endif // !UE_BUILD_SHIPPING
-    } // End if (HasPhysicsAuthority)
-    else if (IsSimulatedProxy()) // Reason: client receives interpolated state from host
-    {
-        // CLIENT PATH: No physics simulation, receive state via replication
-        if (VehicleHull) // Reason: disable physics on clients
-        {
-            VehicleHull->SetSimulatePhysics(false);
-        } // End if (VehicleHull)
-
-        // Initialize interpolation state
-        FMemory::Memzero(&InterpolationStart, sizeof(FReplicatedVehicleState));
-        FMemory::Memzero(&InterpolationTarget, sizeof(FReplicatedVehicleState));
-        InterpolationAlpha = 0.0f;
-    } // End if (IsSimulatedProxy)
-#else
-    //--------------------------------------------------------------------------
-    // NON-NETWORKED: Standard single-player initialization
-    //--------------------------------------------------------------------------
     ApplyPacejkaPlySteerSymmetry();
     GenerateTrajectoryAtlas();                                           // Generate multi-ray trace patterns for suspension
     CalibrateSuspensionAssembly();                                       // Compute spring rates and rest lengths
@@ -120,11 +59,11 @@ void AVehicleSolver::BeginPlay()
         const int32 WheelCount = Axles_GT.Num();
         StaticWheelLoads_GT.SetNum(WheelCount);
         PhysicsCallback->StaticWheelLoads.SetNum(WheelCount);
-
+        
         // Estimate static load as mass * gravity / wheel count
         const float TotalWeight = VehicleHull ? VehicleHull->GetMass() * 9.80f : 1720.0f * 9.80f;
         const float StaticLoadPerWheel = TotalWeight / FMath::Max(1, WheelCount);
-
+        
         for (int32 i = 0; i < WheelCount; ++i)
         {
             StaticWheelLoads_GT[i] = StaticLoadPerWheel;
@@ -132,7 +71,6 @@ void AVehicleSolver::BeginPlay()
         }
     }
 #endif // !UE_BUILD_SHIPPING
-#endif // P2P
 } // End BeginPlay()
 
 /* Update physics input data every frame for simulation thread */
@@ -140,71 +78,6 @@ void AVehicleSolver::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-#if P2P
-    //--------------------------------------------------------------------------
-    // P2P TICK BEHAVIOR
-    //--------------------------------------------------------------------------
-    if (HasPhysicsAuthority()) // Reason: host packs and replicates state
-    {
-        // HOST PATH: Full physics, pack state at 60Hz
-        InputTensor_GameThread.Timestamp = GetWorld() ? static_cast<float>(GetWorld()->GetTimeSeconds()) : 0.0f;
-        InputConduit.Publish(InputTensor_GameThread);
-
-        if (PhysicsCallback)
-        {
-            if (FVehicleSolverInput* Input = PhysicsCallback->GetProducerInputData_External())
-            {
-#if !UE_BUILD_SHIPPING
-                Input->FrameNumber = GFrameCounter;
-#endif
-                Input->World = GetWorld();
-                FCollisionQueryParams TraceParams(NAME_None, FCollisionQueryParams::GetUnknownStatId(), false, this);
-                TraceParams.bTraceComplex = false;
-                TraceParams.AddIgnoredActor(this);
-                Input->TraceParams = TraceParams;
-
-                FCollisionObjectQueryParams OQ;
-                OQ.AddObjectTypesToQuery(ECC_WorldStatic);
-                OQ.AddObjectTypesToQuery(ECC_WorldDynamic);
-                Input->ObjectQueryParams = OQ;
-
-                Input->TraceResponse = FCollisionResponseContainer::GetDefaultResponseContainer();
-            } // End if (input)
-        } // End if (callback)
-
-        // Pack and replicate state at ReplicationInterval (60Hz)
-        ReplicationAccumulator += DeltaTime;
-        if (ReplicationAccumulator >= ReplicationInterval) // Reason: limit replication bandwidth
-        {
-            PackReplicatedState(ReplicatedState);
-            ++PhysicsFrameCounter;
-            ReplicationAccumulator = 0.0f;
-        } // End if (replication interval)
-    } // End if (HasPhysicsAuthority)
-    else if (IsSimulatedProxy()) // Reason: client interpolates and sends input
-    {
-        // CLIENT PATH: Interpolate state, send input to host
-        constexpr float InterpSpeed = 15.0f;                              // [Hz] - Interpolation speed
-        InterpolationAlpha = FMath::Min(InterpolationAlpha + DeltaTime * InterpSpeed, 1.0f);
-        InterpolateState(InterpolationAlpha);
-
-        // Send input to host
-        FReplicatedVehicleInput Input;
-        Input.Throttle = InputTensor_GameThread.Throttle;
-        Input.Brake = InputTensor_GameThread.Brake;
-        Input.Steering = InputTensor_GameThread.Steering;
-        Input.Clutch = InputTensor_GameThread.Clutch;
-        Input.GearRequest = 0; // TODO: map gear requests
-        Input.SetHandbrake(InputTensor_GameThread.Handbrake > 0.5f);
-        Input.SetBoost(InputTensor_GameThread.bBoost);
-        Input.InputSequence = ++InputSequenceCounter;
-
-        Server_SendInput(Input);
-    } // End if (IsSimulatedProxy)
-#else
-    //--------------------------------------------------------------------------
-    // NON-NETWORKED: Standard tick behavior
-    //--------------------------------------------------------------------------
     // Publish input tensor to physics thread (GT -> PT)
     InputTensor_GameThread.Timestamp = GetWorld() ? static_cast<float>(GetWorld()->GetTimeSeconds()) : 0.0f;
     InputConduit.Publish(InputTensor_GameThread);
@@ -221,17 +94,16 @@ void AVehicleSolver::Tick(float DeltaTime)
             TraceParams.bTraceComplex = false;
             TraceParams.AddIgnoredActor(this);
             Input->TraceParams = TraceParams;
-
+            
             // Precompute object query params once (avoids per-trace allocation)
             FCollisionObjectQueryParams OQ;
             OQ.AddObjectTypesToQuery(ECC_WorldStatic);
             OQ.AddObjectTypesToQuery(ECC_WorldDynamic);
             Input->ObjectQueryParams = OQ;
-
+            
             Input->TraceResponse = FCollisionResponseContainer::GetDefaultResponseContainer();
         } // End if (input)
     } // End if (callback)
-#endif // P2P
 
     // Debug visualization for aerodynamics (ride height and force vectors)
 #if !UE_BUILD_SHIPPING
@@ -294,18 +166,6 @@ void AVehicleSolver::OnConstruction(const FTransform& Transform)
 {
     Super::OnConstruction(Transform);
 } // End OnConstruction()
-
-/*====================================================================================================================================================
-                                                                    NETWORKING
-====================================================================================================================================================*/
-/* Register properties for network replication in multiplayer */
-void AVehicleSolver::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
-{
-    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-#if P2P
-    DOREPLIFETIME_CONDITION(AVehicleSolver, ReplicatedState, COND_SimulatedOnly);
-#endif // P2P
-} // End GetLifetimeReplicatedProps()
 
 /*====================================================================================================================================================
                                                                   EDITOR SUPPORT
@@ -442,14 +302,6 @@ FVehicleSolverCallback::FVehicleSolverCallback()
 /* Main physics simulation callback - runs on physics thread before each simulation step */
 void FVehicleSolverCallback::OnPreSimulate_Internal()
 {
-#if P2P
-    // Skip physics on clients - they receive interpolated state from host
-    if (VehicleOwner && !VehicleOwner->HasPhysicsAuthority())
-    {
-        return; // Early-out for simulated proxies (clients)
-    } // End if (not authority)
-#endif // P2P
-
 #if !UE_BUILD_SHIPPING
     // Start total frame timing
     const uint64 FrameStartCycles = FPlatformTime::Cycles64();
@@ -4719,19 +4571,10 @@ constexpr float OMEGA_LOCK_THRESHOLD = 0.1f;                                 // 
 //------------------------------------------------------------------------------
 // STICTION CONSTANTS (Simplified)
 //------------------------------------------------------------------------------
-constexpr float STOP_VELOCITY_THRESHOLD = 0.5f;                              // [m⋅s⁻¹] - Below this, we attempt stiction
+constexpr float STOP_VELOCITY_THRESHOLD = 0.2f;                              // [m⋅s⁻¹] - Below this, we attempt stiction
 constexpr float MU_STATIC = 1.0f;                                            // [-] - Static friction coefficient
 constexpr float MIN_HOLDING_TORQUE = 5.0f;                                   // [N⋅m] - Min torque (drag/bearing) always present
 
-//------------------------------------------------------------------------------
-// STATE DEFINITION (Local enum for stiction state machine)
-//------------------------------------------------------------------------------
-enum class ETireState
-{
-    Kinetic,          // Sliding/Rolling (Pacejka active)
-    Static_Lateral,   // Rolling but resisting side-slide (Mixed)
-    Static_Full       // Fully Locked (Parking brake / Holding on slope)
-};
 
 
 
@@ -4790,335 +4633,227 @@ for (int32 i = 0; i < WheelCount; ++i)
     BrakeState.CurrentFrictionCoeff = BrakeSpec.GetFrictionCoefficient(BrakeState.CurrentTemperature); // [-]
     AxleData.BrakeTorquesNm[i] = BrakeState.CurrentTorque;                   // [N⋅m]
 
-    //--------------------------------------------------------------------------
-    // STAGE 3: Airborne wheel handling
-    //--------------------------------------------------------------------------
-    if (!AxleData.bIsInContact[i] || AxleData.WheelLoads[i] < 10.0f) // Reason: Wheel not grounded
+
+//------------------------------------------------------------------------------
+// STAGE 3: AIRBORNE WHEEL HANDLING
+//------------------------------------------------------------------------------
+if (!AxleData.bIsInContact[i] || AxleData.WheelLoads[i] < 10.0f) // Reason: Wheel not grounded
+{
+    const float T_net = (AxleData.DriveTorquesNm[i] * FinalDriveEfficiency) - (BrakeState.CurrentTorque * FMath::Sign(Omega)); // [N⋅m]
+    AxleData.AngularVelocities[i] += (T_net - 0.05f * Omega) * InvWheelInertia * DeltaTime; // [rad⋅s⁻¹]
+
+    if (BrakeState.CurrentTorque > 1.0f && FMath::Abs(AxleData.AngularVelocities[i]) < 0.5f) // Reason: Prevent brake-induced spin reversal
     {
-        const float T_net = (AxleData.DriveTorquesNm[i] * FinalDriveEfficiency) - (BrakeState.CurrentTorque * FMath::Sign(Omega)); // [N⋅m]
-        AxleData.AngularVelocities[i] += (T_net - 0.05f * Omega) * InvWheelInertia * DeltaTime; // [rad⋅s⁻¹]
-
-        if (BrakeState.CurrentTorque > 1.0f && FMath::Abs(AxleData.AngularVelocities[i]) < 0.5f) // Reason: Prevent brake-induced reversal
-        {
-            AxleData.AngularVelocities[i] = 0.0f;
-        } // End if (brake reversal check)
-
-        AxleData.LongitudinalForces[i] = 0.0f;
-        AxleData.LateralForces[i] = 0.0f;
-        AxleData.LongitudinalSlips[i] = 0.0f;
-        AxleData.SlipAnglesRad[i] = 0.0f;
-        AxleData.WheelLocked[i] = false;
-        continue;
-    } // End if (airborne check)
-
-    //--------------------------------------------------------------------------
-    // STAGE 4: Calculate contact patch velocity
-    //--------------------------------------------------------------------------
-    const FVector ContactLocationCms = AxleData.AverageContactLocations[i];  // [cm]
-    const FVector r_arm = ContactLocationCms - Rec.σ_centerOfMass;          // [cm]
-    const FVector v_contact_cms = Rec.ν_linearCms + FVector::CrossProduct(Rec.ω_angularRads, r_arm); // [cm⋅s⁻¹]
-    const FVector v_contact_ms = v_contact_cms * 0.01f;                      // [m⋅s⁻¹]
-    const FVector v_tangent_ms = FVector::VectorPlaneProject(v_contact_ms, Rec.ê_vertical); // [m⋅s⁻¹] - Use vehicle up, not ground normal
-    const float v_contact_speed = v_tangent_ms.Size();                       // [m⋅s⁻¹]
-
-    //--------------------------------------------------------------------------
-    // STAGE 5: Calculate gravity-induced slope force (ground reference frame)
-    //--------------------------------------------------------------------------
-    // Use sprung mass (from Lagrange multipliers) and ground normal for correct physics:
-    // - F_slope = m_wheel × g × sin(θ) where θ is ground angle
-    // - Projecting gravity onto ground plane gives the sliding component
-    const float Fz = AxleData.WheelLoads[i];                                 // [N] - Normal load (for friction capacity)
-    const float WheelMass_kg = AxleData.SprungMasses[i];                     // [kg] - Per-wheel sprung mass (55/45 distribution)
-    const FVector F_Gravity_World = FVector(0.0f, 0.0f, -WheelMass_kg * 9.81f); // [N] - Actual gravity force
-    const FVector GroundNormal = AxleData.AverageContactNormals[i];          // [-] - Ground surface normal
-    const FVector F_slope_N = FVector::VectorPlaneProject(F_Gravity_World, GroundNormal); // [N] - Slope force (sliding component)
-    const float F_slope_mag = F_slope_N.Size();                              // [N]
-    AxleData.GradeForceN[i] = F_slope_mag;                                   // [N] - Telemetry
-
-    //--------------------------------------------------------------------------
-    // STAGE 6: Calculate available brake holding capacity
-    //--------------------------------------------------------------------------
-    const float R = AxleData.TireSpecifications[i].Mechanical.Geometry.OuterRadius; // [m]
-    const float SafeRadius = FMath::Max(R, 0.01f);                           // [m]
-
-    // ==========================================================================
-    // STAGE 7: ROBUST STICTION STATE MACHINE (CORRECTED)
-    // ==========================================================================
-
-    // 1. Inputs & Geometry
-    const float SteerRad = AxleData.SteerAnglesRad[i];
-    const FVector WheelFwd = Rec.ê_longitudinal.RotateAngleAxis(FMath::RadiansToDegrees(SteerRad), Rec.ê_vertical);
-    const FVector WheelRgt = FVector::CrossProduct(Rec.ê_vertical, WheelFwd);
-
-    // Calculate Local Velocities (Positive Vx = Moving Forward)
-    const float Vx_Local = FVector::DotProduct(v_contact_ms, WheelFwd);
-    const float Vy_Local = FVector::DotProduct(v_contact_ms, WheelRgt);
-
-    // 2. Calculate Forces Acting on the Wheel (Gravity/Slope)
-    // Reuse F_slope_N computed in STAGE 5 using correct physics:
-    // - Uses sprung mass (not Fz) for gravity force
-    // - Uses ground normal (not vehicle up) for projection
-    const FVector F_SlopeForce_N = F_slope_N;                                // [N] - From STAGE 5
-
-    // Project Slope Force into Wheel Local Frame
-    const float F_Slope_Long_N = FVector::DotProduct(F_SlopeForce_N, WheelFwd);
-    const float F_Slope_Lat_N = FVector::DotProduct(F_SlopeForce_N, WheelRgt);
-
-    // 3. Define Capacities
-    const float F_TireFrictionLimit_N = Fz * MU_STATIC;
-
-    float MechanicalBrakeTorque = BrakeState.CurrentTorque;
-    // Include engine braking/drag in holding capacity
-    if (FMath::Abs(AxleData.DriveTorquesNm[i]) > 0.1f && Throttle < 0.05f)
-    {
-        MechanicalBrakeTorque += FMath::Abs(AxleData.DriveTorquesNm[i] * FinalDriveEfficiency);
-    }
-    MechanicalBrakeTorque += MIN_HOLDING_TORQUE;
-    const float F_MechanicalHoldLimit_N = MechanicalBrakeTorque / SafeRadius;
-
-    // 4. State Machine Evaluation
-    ETireState CurrentState = ETireState::Kinetic;
-    bool bTireCanHoldLong = false;
-    bool bMechCanHoldLong = false;
-
-    // Check if we are slow enough to attempt a hold
-    if (v_contact_speed < STOP_VELOCITY_THRESHOLD)
-    {
-        // Lateral Grip Check: Do we have enough grip to hold the car sideways?
-        // We compare Slope Force vs Max Friction
-        if (FMath::Abs(F_Slope_Lat_N) < F_TireFrictionLimit_N)
-        {
-            // Calculate remaining grip for longitudinal use (Friction Circle)
-            // Grip_Remaining = sqrt(Max^2 - Used_Lat^2)
-            const float F_FrictionRemaining_N = FMath::Sqrt(FMath::Max(0.0f, FMath::Square(F_TireFrictionLimit_N) - FMath::Square(F_Slope_Lat_N)));
-
-            // Longitudinal Grip & Mech Check
-            bTireCanHoldLong = FMath::Abs(F_Slope_Long_N) < F_FrictionRemaining_N;
-            bMechCanHoldLong = FMath::Abs(F_Slope_Long_N) < F_MechanicalHoldLimit_N;
-
-            if (bTireCanHoldLong && bMechCanHoldLong)
-            {
-                CurrentState = ETireState::Static_Full;
-            }
-            else
-            {
-                CurrentState = ETireState::Static_Lateral;
-            }
-        }
-    }
-
-    // ==========================================================================
-    // STAGE 8: FORCE APPLICATION (FIXED DAMPING & BUDGETING)
-    // ==========================================================================
-    float Fx_Final_N = 0.0f;
-    float Fy_Final_N = 0.0f;
-    float Mz_Final_Nm = 0.0f;
-
-
-    if (CurrentState == ETireState::Static_Full)
-    {
-        // --- GRAVITY COMPENSATION ONLY (No Damping) ---
-        // Apply exact opposite of slope force to neutralize gravity.
-        // Damping removed: it caused micro-jitter due to numerical noise feedback.
-        // See: Docs/Reviews/FRICTION_STATEMACHINE_FIX.md
-        Fx_Final_N = -F_Slope_Long_N;
-        Fy_Final_N = -F_Slope_Lat_N;
-
-        // Visuals
         AxleData.AngularVelocities[i] = 0.0f;
-        AxleData.WheelLocked[i] = true;
+    } // End if (brake reversal check)
 
-        bAnyWheelClamped = true;
-    }
-    else if (CurrentState == ETireState::Static_Lateral)
+    AxleData.LongitudinalForces[i] = 0.0f;
+    AxleData.LateralForces[i] = 0.0f;
+    AxleData.LongitudinalSlips[i] = 0.0f;
+    AxleData.SlipAnglesRad[i] = 0.0f;
+    AxleData.WheelLocked[i] = false;
+    continue;
+} // End if (airborne check)
+
+//------------------------------------------------------------------------------
+// STAGE 4: CALCULATE CONTACT GEOMETRY & VELOCITIES
+//------------------------------------------------------------------------------
+const FVector ContactLocationCms = AxleData.AverageContactLocations[i];      // [cm]
+const float SteerRad = AxleData.SteerAnglesRad[i];                          // [rad]
+const FVector WheelForward = Rec.ê_longitudinal.RotateAngleAxis(FMath::RadiansToDegrees(SteerRad), Rec.ê_vertical); // [-]
+const FVector WheelRight = FVector::CrossProduct(Rec.ê_vertical, WheelForward); // [-]
+
+const FVector r_arm = ContactLocationCms - Rec.σ_centerOfMass;              // [cm]
+const FVector v_contact_cms = Rec.ν_linearCms + FVector::CrossProduct(Rec.ω_angularRads, r_arm); // [cm⋅s⁻¹]
+const FVector v_contact_ms = v_contact_cms * 0.01f;                          // [m⋅s⁻¹]
+const float Vx_Local = FVector::DotProduct(v_contact_ms, WheelForward);     // [m⋅s⁻¹]
+const float Vy_Local = FVector::DotProduct(v_contact_ms, WheelRight);       // [m⋅s⁻¹]
+const float v_contact_speed = v_contact_ms.Size();                           // [m⋅s⁻¹]
+
+const float R = AxleData.TireSpecifications[i].Mechanical.Geometry.OuterRadius; // [m]
+const float Fz = AxleData.WheelLoads[i];                                     // [N]
+
+
+//------------------------------------------------------------------------------
+// STAGE 5: STATIC FRICTION GATE
+//------------------------------------------------------------------------------
+const FVector GroundNormal = AxleData.AverageContactNormals[i];              // [-] - Actual surface normal
+const FVector F_gravity_world = FVector(0.0f, 0.0f, -Fz);                   // [N] - Weight force in world space
+const FVector F_slope_N = FVector::VectorPlaneProject(F_gravity_world, GroundNormal); // [N] - Gravity component parallel to ground
+const float F_slope_long = FVector::DotProduct(F_slope_N, WheelForward);    // [N] - Longitudinal slope force
+const float F_slope_lat = FVector::DotProduct(F_slope_N, WheelRight);       // [N] - Lateral slope force
+
+const float SafeRadius = FMath::Max(R, 0.01f);                               // [m]
+const float BrakeTorque = BrakeState.CurrentTorque;                          // [N⋅m]
+const float F_brake_capacity = BrakeTorque / SafeRadius;                     // [N]
+const float F_tire_limit = Fz * MU_STATIC;                                   // [N]
+
+constexpr float LOCK_SPEED_THRESHOLD = 0.5f;                                 // [m⋅s⁻¹]
+constexpr float MIN_BRAKE_LOCK = 10.0f;                                      // [N⋅m]
+
+const bool bSlowEnough = v_contact_speed < LOCK_SPEED_THRESHOLD;             // [-]
+const bool bBrakesApplied = BrakeTorque > MIN_BRAKE_LOCK;                    // [-]
+const bool bCanHoldLong = F_tire_limit > FMath::Abs(F_slope_long) ;  // [-] PASSIVE: tire only
+const bool bCanHoldLat = F_tire_limit > FMath::Abs(F_slope_lat);             // [-]
+
+// MODE 1: PASSIVE HOLD (tire friction alone)
+const bool bPassiveHold = bSlowEnough && bCanHoldLong && bCanHoldLat;       // [-] No brakes needed
+
+// MODE 2: BRAKE-ASSISTED HOLD (tire + brakes)
+const bool bBrakeHold = bSlowEnough && bBrakesApplied && 
+                        ((F_brake_capacity + F_tire_limit) > FMath::Abs(F_slope_long) ); // [-]
+
+float Fx_N = 0.0f;                                                           // [N]
+float Fy_N = 0.0f;                                                           // [N]
+float Mz_Nm = 0.0f;                                                          // [N⋅m]
+
+if (bPassiveHold || bBrakeHold) // Reason: Either mode activates static hold
+{
+
+    
+    Fx_N = -F_slope_long;                                                    // [N]
+    Fy_N = -F_slope_lat;                                                     // [N]
+    Mz_Nm = 0.0f;                                                            // [N⋅m]
+    
+    AxleData.LongitudinalSlips[i] = 0.0f;                                    // [-]
+    AxleData.SlipAnglesRad[i] = 0.0f;                                        // [rad]
+    AxleData.LongitudinalForces[i] = Fx_N;                                   // [N]
+    AxleData.LateralForces[i] = Fy_N;                                        // [N]
+    AxleData.AngularVelocities[i] = 0.0f;                                    // [rad⋅s⁻¹]
+    AxleData.WheelLocked[i] = true;                                          // [-]
+    
+    bAnyWheelClamped = true;                                                 // [-]
+}
+else // Reason: Dynamic motion - use Pacejka
+{
+    const float Camber = 0.0f;                                               // [rad]
+    SolveContactSlip(i, DeltaTime, Rec, AxleData);
+    
+    Fx_N = AxleData.LongitudinalForces[i];                                   // [N]
+    Fy_N = AxleData.LateralForces[i];                                        // [N]
+    Mz_Nm = ComputeSelfAligningTorque(i, AxleData.SlipAnglesRad[i], AxleData.LongitudinalSlips[i], Fy_N, Camber, AxleData); // [N⋅m]
+    
+    AxleData.WheelLocked[i] = false;                                         // [-]
+} // End if (static vs dynamic check)
+//------------------------------------------------------------------------------
+// STAGE 6: APPLY TIRE FORCES TO CHASSIS
+//------------------------------------------------------------------------------
+const FVector TireForceWorld = (WheelForward * Fx_N) + (WheelRight * Fy_N); // [N]
+TotalForceCm += TireForceWorld * 100.0f;                                     // [kg⋅cm⋅s⁻²]
+
+const FVector Arm = ContactLocationCms - Rec.σ_centerOfMass;                // [cm]
+TotalTorqueCm += FVector::CrossProduct(Arm, TireForceWorld * 100.0f);       // [kg⋅cm²⋅s⁻²]
+TotalTorqueCm += Rec.ê_vertical * (Mz_Nm * 100.0f);                         // [kg⋅cm²⋅s⁻²]
+
+//------------------------------------------------------------------------------
+// STAGE 7: WHEEL ROTATION INTEGRATION
+//------------------------------------------------------------------------------
+const float T_drive = AxleData.DriveTorquesNm[i] * FinalDriveEfficiency;    // [N⋅m]
+const float T_tire = -Fx_N * R;                                              // [N⋅m]
+const float T_roll = -CoefficientOfRollingResistance * Fz * R * FMath::Sign(Omega); // [N⋅m]
+const float T_brake = -BrakeState.CurrentTorque * FMath::Sign(Omega);       // [N⋅m]
+
+const float T_accel = T_drive + T_tire;                                      // [N⋅m]
+const float T_resist_magnitude = FMath::Abs(T_roll) + FMath::Abs(T_brake);  // [N⋅m]
+
+const float OmegaAbs = FMath::Abs(Omega);                                    // [rad⋅s⁻¹]
+const float T_stop = (WheelInertia * OmegaAbs) / DeltaTime;                 // [N⋅m]
+const float T_resist_clamped = FMath::Min(T_resist_magnitude, T_stop);      // [N⋅m]
+
+const float T_resist_signed = (OmegaAbs > KINDA_SMALL_NUMBER) ? -FMath::Sign(Omega) * T_resist_clamped : 0.0f; // [N⋅m]
+
+const float T_net = T_accel + T_resist_signed;                               // [N⋅m]
+float Omega_new = Omega + (T_net * InvWheelInertia) * DeltaTime;            // [rad⋅s⁻¹]
+
+if (FMath::Sign(Omega) != FMath::Sign(Omega_new) && FMath::Sign(Omega) != 0.0f && T_accel * FMath::Sign(Omega) <= 0.0f) // Reason: Prevent reversal
+{
+    Omega_new = 0.0f;
+} // End if (reversal prevention check)
+
+if (!AxleData.WheelLocked[i]) // Reason: Only update wheel rotation if not statically locked
+{
+    AxleData.WheelLocked[i] = (FMath::Abs(Omega_new) < OMEGA_LOCK_THRESHOLD && BrakeState.CurrentTorque > 10.0f); // [-]
+    if (AxleData.WheelLocked[i])
     {
-        // --- LATERAL HOLD ONLY ---
-        float Fy_Total = -F_Slope_Lat_N ;
-
-        if (FMath::Abs(Fy_Total) > F_TireFrictionLimit_N)
-        {
-            Fy_Total = FMath::Sign(Fy_Total) * F_TireFrictionLimit_N;
-        }
-        Fy_Final_N = Fy_Total;
-
-        // Longitudinal: Kinetic (Pacejka)
-        SolveContactSlip(i, DeltaTime, Rec, AxleData);
-        Fx_Final_N = AxleData.LongitudinalForces[i];
-
-        AxleData.WheelLocked[i] = false;
-    }
-    else // Kinetic
-    {
-        // --- DYNAMIC SLIP ---
-        SolveContactSlip(i, DeltaTime, Rec, AxleData);
-        Fx_Final_N = AxleData.LongitudinalForces[i];
-        Fy_Final_N = AxleData.LateralForces[i];
-
-        // [CRITICAL FIX] BRAKE ACCELERATION GUARD
-        // If we are significantly braking, the Longitudinal Force MUST oppose velocity.
-        // If the solver outputs a force pushing in the same direction as velocity, it is WRONG.
-        // This catches the "Brake Accelerating" glitch.
-        if (BrakeState.CurrentTorque > 50.0f)
-        {
-            // If moving Forward (Vx > 0) and Force is Forward (Fx > 0) -> CLAMP TO 0
-            if (Vx_Local > 0.1f && Fx_Final_N > 0.0f)
-            {
-                Fx_Final_N = 0.0f;
-            }
-            // If moving Backward (Vx < 0) and Force is Backward (Fx < 0) -> CLAMP TO 0
-            else if (Vx_Local < -0.1f && Fx_Final_N < 0.0f)
-            {
-                Fx_Final_N = 0.0f;
-            }
-        }
-
-        AxleData.WheelLocked[i] = false;
-    }
-
-    // Recalculate Aligning Torque for all states
-    const float Camber = 0.0f;
-    Mz_Final_Nm = ComputeSelfAligningTorque(i, AxleData.SlipAnglesRad[i], AxleData.LongitudinalSlips[i], Fy_Final_N, Camber, AxleData);
-
-    // Update Axle Data
-    AxleData.LongitudinalForces[i] = Fx_Final_N;
-    AxleData.LateralForces[i] = Fy_Final_N;
+        Omega_new = 0.0f;
+    } // End if (brake lock check)
     
-    if (AxleData.SelfAligningTorques.IsValidIndex(i))
-    {
-        AxleData.SelfAligningTorques[i] = Mz_Final_Nm;
-    }
+    AxleData.AngularVelocities[i] = Omega_new;                               // [rad⋅s⁻¹]
+    AxleData.RotationAngles[i] += Omega_new * DeltaTime;                     // [rad]
+    AxleData.RotationAngles[i] = FMath::Fmod(AxleData.RotationAngles[i], 2.0f * PI); // [rad]
+} // End if (wheel rotation update check)
 
-    
-    // ==========================================================================
-    // STAGE 9: APPLY FORCES TO RIGID BODY
-    // ==========================================================================
-    const FVector TireForceWorld = (WheelFwd * Fx_Final_N) + (WheelRgt * Fy_Final_N); // [N]
-    TotalForceCm += TireForceWorld * 100.0f;                                 // [kg⋅cm⋅s⁻²]
-    
-    const FVector LeverArm = ContactLocationCms - Rec.σ_centerOfMass;       // [cm]
-    TotalTorqueCm += FVector::CrossProduct(LeverArm, TireForceWorld * 100.0f); // [kg⋅cm²⋅s⁻²]
-    TotalTorqueCm += Rec.ê_vertical * (Mz_Final_Nm * 100.0f);               // [kg⋅cm²⋅s⁻²]
-    
-    // ==========================================================================
-    // STAGE 10: WHEEL INTEGRATION (Only if not Static_Full)
-    // ==========================================================================
-    if (CurrentState != ETireState::Static_Full)
-    {
-        const float T_drive = AxleData.DriveTorquesNm[i] * FinalDriveEfficiency; // [N⋅m]
-        const float T_tire = -Fx_Final_N * R;                                // [N⋅m] - Reaction from road
-        const float T_brake = -BrakeState.CurrentTorque * FMath::Sign(Omega); // [N⋅m]
-
-        // Add Rolling Resistance
-        const float T_roll = -MIN_HOLDING_TORQUE * FMath::Sign(Omega);       // [N⋅m]
-
-        // Integration
-        float OmegaNew = Omega + ((T_drive + T_tire + T_brake + T_roll) * InvWheelInertia) * DeltaTime;
-
-        // Handle Zero Crossing / Lock Logic
-        if (FMath::Sign(Omega) != FMath::Sign(OmegaNew) && BrakeState.CurrentTorque > 1.0f)
-        {
-            OmegaNew = 0.0f;                                                 // Brake clamp stopped the wheel rotation
-        }
-
-        AxleData.AngularVelocities[i] = OmegaNew;
-        AxleData.RotationAngles[i] += OmegaNew * DeltaTime;
-        AxleData.RotationAngles[i] = FMath::Fmod(AxleData.RotationAngles[i], 2.0f * PI);
-    }
-    
-    // ==========================================================================
-    // FRICTION STATE MACHINE CSV LOGGING
-    // ==========================================================================
+//------------------------------------------------------------------------------
+// FRICTION STATE MACHINE CSV LOGGING
+//------------------------------------------------------------------------------
 #if !UE_BUILD_SHIPPING
-    if (VehicleOwner && VehicleOwner->bEnableFrictionStateLogging &&
-        (VehicleOwner->FrictionLogFrameCounter % VehicleOwner->FrictionLogInterval == 0))
-    {
-        // Calculate wheel-frame velocities for logging
-        const float Vx_wheel = FVector::DotProduct(v_contact_ms, WheelFwd);  // [m/s] - Longitudinal
-        const float Vy_wheel = FVector::DotProduct(v_contact_ms, WheelRgt);  // [m/s] - Lateral
+if (VehicleOwner && VehicleOwner->bEnableFrictionStateLogging && (VehicleOwner->FrictionLogFrameCounter % VehicleOwner->FrictionLogInterval == 0))
+{
+    FFrictionStateSample Sample;
+    Sample.Time_s = Input.Timestamp;                                         // [s]
+    Sample.DeltaTime_s = DeltaTime;                                          // [s]
+    Sample.WheelIndex = i;                                                   // [-]
+    Sample.StateEnum = AxleData.WheelLocked[i] ? 2 : 0;                     // [-]
+    Sample.VehicleSpeed_ms = Rec.ν_magnitudeMs;                              // [m⋅s⁻¹]
+    Sample.Vx_ms = Vx_Local;                                                 // [m⋅s⁻¹]
+    Sample.Vy_ms = Vy_Local;                                                 // [m⋅s⁻¹]
+    Sample.ContactSpeed_ms = v_contact_speed;                                // [m⋅s⁻¹]
+    Sample.WheelOmega_rads = Omega;                                          // [rad⋅s⁻¹]
+    Sample.BrakeTorque_Nm = BrakeState.CurrentTorque;                        // [N⋅m]
+    Sample.ClutchTorque_Nm = ClutchState.TorqueTransferred;                  // [N⋅m]
+    Sample.DriveTorque_Nm = AxleData.DriveTorquesNm[i];                      // [N⋅m]
+    Sample.F_Slope_Long_N = F_slope_long;                                    // [N]
+    Sample.F_Slope_Lat_N = F_slope_lat;                                      // [N]
+    Sample.F_TireFrictionLimit_N = F_tire_limit;                             // [N]
+    Sample.F_MechHoldLimit_N = F_brake_capacity;                             // [N]
+    Sample.Fx_Applied_N = Fx_N;                                              // [N]
+    Sample.Fy_Applied_N = Fy_N;                                              // [N]
+    Sample.WheelLoad_N = Fz;                                                 // [N]
+    Sample.bTireCanHoldLong = bCanHoldLong;                                  // [-]
+    Sample.bMechCanHoldLong = bCanHoldLong;                                  // [-]
 
-        FFrictionStateSample Sample;
-        Sample.Time_s = Input.Timestamp;                                     // [s] - Use InputTensor timestamp
-        Sample.DeltaTime_s = DeltaTime;
-        Sample.WheelIndex = i;
-        Sample.StateEnum = (CurrentState == ETireState::Kinetic) ? 0 :
-                           (CurrentState == ETireState::Static_Lateral) ? 1 : 2;
-        Sample.VehicleSpeed_ms = Rec.ν_magnitudeMs;
-        Sample.Vx_ms = Vx_wheel;
-        Sample.Vy_ms = Vy_wheel;
-        Sample.ContactSpeed_ms = v_contact_speed;
-        Sample.WheelOmega_rads = Omega;
-        Sample.BrakeTorque_Nm = BrakeState.CurrentTorque;
-        Sample.ClutchTorque_Nm = ClutchState.TorqueTransferred;
-        Sample.DriveTorque_Nm = AxleData.DriveTorquesNm[i];
-        Sample.F_Slope_Long_N = F_Slope_Long_N;
-        Sample.F_Slope_Lat_N = F_Slope_Lat_N;
-        Sample.F_TireFrictionLimit_N = F_TireFrictionLimit_N;
-        Sample.F_MechHoldLimit_N = F_MechanicalHoldLimit_N;
-        Sample.Fx_Applied_N = Fx_Final_N;
-        Sample.Fy_Applied_N = Fy_Final_N;
-        Sample.WheelLoad_N = Fz;
-        Sample.bTireCanHoldLong = bTireCanHoldLong;
-        Sample.bMechCanHoldLong = bMechCanHoldLong;
-
-        // Add to buffer on vehicle owner
-        VehicleOwner->FrictionStateSampleBuffer.Add(Sample);
-    }
-#endif // !UE_BUILD_SHIPPING
-    
-    TotalRollingResistanceForce_N += CoefficientOfRollingResistance * Fz;    // [N]
-} // End for (wheel loop)
-
-// Increment debug frame counter (outside wheel loop)
-#if !UE_BUILD_SHIPPING
-if (VehicleOwner) { VehicleOwner->FrictionLogFrameCounter++; }
+    VehicleOwner->FrictionStateSampleBuffer.Add(Sample);
+} // End if (friction logging check)
+if (VehicleOwner) VehicleOwner->FrictionLogFrameCounter++;
 #endif
 
-//------------------------------------------------------------------------------
-// Apply static clamp forces to chassis
-//------------------------------------------------------------------------------
-if (!TotalClampForce_N.IsNearlyZero())
-{
-    TotalForceCm += TotalClampForce_N * 100.0f;                              // [kg⋅cm⋅s⁻²]
-    
-    if (RigidBody->ObjectState() == Chaos::EObjectStateType::Sleeping) // Reason: Wake physics for force application
-    {
-        RigidBody->SetObjectState(Chaos::EObjectStateType::Dynamic);
-    } // End if (sleeping check)
+TotalRollingResistanceForce_N += CoefficientOfRollingResistance * Fz;        // [N]
 }
-
 //------------------------------------------------------------------------------
 // Apply rolling resistance to chassis (impulse-limited)
 //------------------------------------------------------------------------------
-if (TotalRollingResistanceForce_N > 0.01f && VehicleSpeed_ms > KINDA_SMALL_NUMBER)
+if (TotalRollingResistanceForce_N > 0.01f && VehicleSpeed_ms > KINDA_SMALL_NUMBER) // Reason: Rolling resistance only active above threshold
 {
     if (VelDir_World.IsNearlyZero())
     {
         VelDir_World = RigidBody->GetV().GetSafeNormal();
-    }
-    
+    } // End if (velocity direction check)
+
     const float VehicleMass = Rec.μ_mass;                                    // [kg]
     const float F_stop_N = (VehicleMass * VehicleSpeed_ms) / DeltaTime;     // [N]
     const float F_applied_N = FMath::Min(TotalRollingResistanceForce_N, F_stop_N); // [N]
-    
+
     TotalForceCm += (-VelDir_World) * (F_applied_N * 100.0f);               // [kg⋅cm⋅s⁻²]
-}
+} // End if (rolling resistance application check)
 
 /*====================================================================================================================================================
                                                     CHASSIS FORCE APPLICATION PASS
 ====================================================================================================================================================*/
-if (!TotalForceCm.IsNearlyZero())
+if (!TotalForceCm.IsNearlyZero()) // Reason: Apply accumulated tire forces to chassis
 {
     if (RigidBody->ObjectState() == Chaos::EObjectStateType::Sleeping)
     {
         RigidBody->SetObjectState(Chaos::EObjectStateType::Dynamic);
-    }
+    } // End if (wake physics check)
     RigidBody->AddForce(TotalForceCm, false);
-}
+} // End if (total force check)
 
-if (!TotalTorqueCm.IsNearlyZero())
+if (!TotalTorqueCm.IsNearlyZero()) // Reason: Apply accumulated tire torques to chassis
 {
     RigidBody->AddTorque(TotalTorqueCm, false);
-}
+} // End if (total torque check)
+
+
 /*====================================================================================================================================================
                                                     ENGINE LOAD REFLECTION PASS
 ====================================================================================================================================================*/
@@ -5540,9 +5275,12 @@ void AVehicleSolver::WriteAerodynamicsCsv()
 
     const FString FilePath = Dir / TEXT("AerodynamicsLog.csv");
     FFileHelper::SaveStringArrayToFile(Lines, *FilePath);
-    UE_LOG(LogTemp, Log, TEXT("🌪️ Aerodynamics CSV written: %s (%d samples)"), *FilePath, AerodynamicsSampleBuffer.Num());
+    UE_LOG(LogTemp, Log, TEXT("Aerodynamics CSV written: %s (%d samples)"), *FilePath, AerodynamicsSampleBuffer.Num());
 }
 
+//====================================================================================================================================================
+//                                              FRICTION STATE MACHINE CSV LOGGING
+//====================================================================================================================================================
 void AVehicleSolver::WriteFrictionStateCsv()
 {
     if (FrictionStateSampleBuffer.Num() == 0) return;
@@ -5565,7 +5303,8 @@ void AVehicleSolver::WriteFrictionStateCsv()
             default: StateStr = TEXT("UNKNOWN"); break;
         }
 
-        Lines.Add(FString::Printf(TEXT("%.6f,%.6f,%d,%s,%.3f,%.3f,%.3f,%.3f,%.3f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%d,%d"),
+        // Use maximum float precision (%.9f gives ~9 decimal places, close to float's 7-8 significant digits)
+        Lines.Add(FString::Printf(TEXT("%.9f,%.9f,%d,%s,%.9f,%.9f,%.9f,%.9f,%.9f,%.9f,%.9f,%.9f,%.9f,%.9f,%.9f,%.9f,%.9f,%.9f,%.9f,%d,%d"),
             S.Time_s, S.DeltaTime_s, S.WheelIndex, *StateStr,
             S.VehicleSpeed_ms, S.Vx_ms, S.Vy_ms, S.ContactSpeed_ms, S.WheelOmega_rads,
             S.BrakeTorque_Nm, S.ClutchTorque_Nm, S.DriveTorque_Nm,
@@ -5585,7 +5324,10 @@ void AVehicleSolver::WriteFrictionStateCsv()
 
     const FString FilePath = Dir / TEXT("FrictionStateMachineLog.csv");
     FFileHelper::SaveStringArrayToFile(Lines, *FilePath);
-    UE_LOG(LogTemp, Log, TEXT("🔧 Friction State Machine CSV written: %s (%d samples)"), *FilePath, FrictionStateSampleBuffer.Num());
+    UE_LOG(LogTemp, Log, TEXT("Friction State CSV written: %s (%d samples)"), *FilePath, FrictionStateSampleBuffer.Num());
+
+    // Clear buffer after writing
+    FrictionStateSampleBuffer.Empty();
 }
 
 /*====================================================================================================================================================
@@ -5741,157 +5483,6 @@ void AVehicleSolver::DrawAerodynamicsDebug()
 
 #endif // !UE_BUILD_SHIPPING
 
-#if P2P
-/*====================================================================================================================================================
-                                                          P2P REPLICATION FUNCTIONS
-====================================================================================================================================================*/
 
-//------------------------------------------------------------------------------
-//                          OnRep_VehicleState
-//------------------------------------------------------------------------------
-/* Called on clients when replicated state is received from host */
-void AVehicleSolver::OnRep_VehicleState()
-{
-    // Store current target as new start for interpolation
-    InterpolationStart = InterpolationTarget;
-    InterpolationTarget = ReplicatedState;
-    InterpolationAlpha = 0.0f;
 
-    // Apply immediately if this is the first state received
-    if (InterpolationStart.FrameNumber == 0) // Reason: first state - no interpolation needed
-    {
-        InterpolationStart = ReplicatedState;
-        ApplyReplicatedState(ReplicatedState);
-    } // End if (first state)
-} // End OnRep_VehicleState()
-
-//------------------------------------------------------------------------------
-//                          Server_SendInput
-//------------------------------------------------------------------------------
-/* Receive client input on host - apply to physics thread */
-void AVehicleSolver::Server_SendInput_Implementation(FReplicatedVehicleInput Input)
-{
-    // Apply client input to game thread tensor (will be published to PT in Tick)
-    InputTensor_GameThread.Throttle = Input.Throttle;
-    InputTensor_GameThread.Brake = Input.Brake;
-    InputTensor_GameThread.Steering = Input.Steering;
-    InputTensor_GameThread.Clutch = Input.Clutch;
-    InputTensor_GameThread.Handbrake = Input.GetHandbrake() ? 1.0f : 0.0f;
-    InputTensor_GameThread.bBoost = Input.GetBoost();
-} // End Server_SendInput_Implementation()
-
-//------------------------------------------------------------------------------
-//                          Multicast_VehicleEvent
-//------------------------------------------------------------------------------
-/* Broadcast vehicle event to all clients */
-void AVehicleSolver::Multicast_VehicleEvent_Implementation(uint8 EventType, int32 EventData)
-{
-    EP2PVehicleEvent Event = static_cast<EP2PVehicleEvent>(EventType);
-
-    switch (Event)
-    {
-        case EP2PVehicleEvent::GearChange:
-            // TODO: Play gear change sound/animation
-            break;
-
-        case EP2PVehicleEvent::Collision:
-            // TODO: Play collision effects
-            break;
-
-        case EP2PVehicleEvent::EngineStart:
-            // TODO: Play engine start sound
-            break;
-
-        case EP2PVehicleEvent::EngineStop:
-            // TODO: Play engine stop sound
-            break;
-
-        case EP2PVehicleEvent::Boost:
-            // TODO: Play boost effects
-            break;
-
-        case EP2PVehicleEvent::Backfire:
-            // TODO: Play backfire effects
-            break;
-
-        default:
-            break;
-    } // End switch (event)
-} // End Multicast_VehicleEvent_Implementation()
-
-//------------------------------------------------------------------------------
-//                          PackReplicatedState
-//------------------------------------------------------------------------------
-/* Pack current physics state into replicated format (HOST ONLY) */
-void AVehicleSolver::PackReplicatedState(FReplicatedVehicleState& OutState)
-{
-    if (!VehicleHull) return; // Reason: no hull, nothing to pack
-
-    // Get transform from physics body
-    const FTransform HullTransform = VehicleHull->GetComponentTransform();
-    OutState.Position = HullTransform.GetLocation();                     // [cm]
-    OutState.Rotation = HullTransform.Rotator();                         // [deg]
-
-    // Get velocities from physics body
-    if (FBodyInstance* BodyInst = VehicleHull->GetBodyInstance())
-    {
-        OutState.LinearVelocity = BodyInst->GetUnrealWorldVelocity();                  // [cm/s]
-        OutState.AngularVelocity = BodyInst->GetUnrealWorldAngularVelocityInRadians(); // [rad/s]
-    } // End if (body instance)
-    else
-    {
-        OutState.LinearVelocity = FVector::ZeroVector;
-        OutState.AngularVelocity = FVector::ZeroVector;
-    } // End if (no body instance)
-
-    // Get drivetrain state from physics callback
-    OutState.Throttle = InputTensor_GameThread.Throttle;
-    OutState.Brake = InputTensor_GameThread.Brake;
-
-    if (PhysicsCallback)
-    {
-        OutState.EngineRPM = PhysicsCallback->DrivetrainState_PT.EngineState.CurrentEngineRPM;
-        OutState.Gear = PhysicsCallback->DrivetrainState_PT.TransmissionState.CurrentGear;
-    } // End if (callback)
-    else
-    {
-        OutState.EngineRPM = 0.0f;
-        OutState.Gear = 0;
-    } // End if (no callback)
-
-    // Set frame number for ordering
-    OutState.FrameNumber = PhysicsFrameCounter;
-} // End PackReplicatedState()
-
-//------------------------------------------------------------------------------
-//                          ApplyReplicatedState
-//------------------------------------------------------------------------------
-/* Apply received replicated state to vehicle visuals (CLIENT ONLY) */
-void AVehicleSolver::ApplyReplicatedState(const FReplicatedVehicleState& InState)
-{
-    if (!VehicleHull) return; // Reason: no hull, nothing to apply
-
-    // Apply transform to hull (Position and Rotation are already in correct format)
-    VehicleHull->SetWorldLocationAndRotation(InState.Position, InState.Rotation, false, nullptr, ETeleportType::TeleportPhysics);
-
-    // Note: Wheel visuals are handled by the tire mesh system based on axle data
-    // For clients, wheel rotation can be estimated from vehicle velocity
-} // End ApplyReplicatedState()
-
-//------------------------------------------------------------------------------
-//                          InterpolateState
-//------------------------------------------------------------------------------
-/* Interpolate between start and target states (CLIENT ONLY) */
-void AVehicleSolver::InterpolateState(float Alpha)
-{
-    // Lerp between start and target
-    FReplicatedVehicleState InterpolatedState = FReplicatedVehicleState::Lerp(
-        InterpolationStart, InterpolationTarget, Alpha);
-
-    // Apply interpolated state
-    ApplyReplicatedState(InterpolatedState);
-} // End InterpolateState()
-
-#endif // P2P
-
-// End VehicleSolver.cpp
+//end VehicleSolver 
