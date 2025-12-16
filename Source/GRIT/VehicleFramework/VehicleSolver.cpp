@@ -2564,6 +2564,9 @@ void FVehicleSolverCallback::ComputeAntiRollbarForces(Chaos::FRigidBodyHandle_In
         if (!AxleData.SpringDisplacements.IsValidIndex(LeftIdx) || !AxleData.SpringDisplacements.IsValidIndex(RightIdx)) continue; // Reason: bounds check
         if (!AxleData.SpringVelocities.IsValidIndex(LeftIdx) || !AxleData.SpringVelocities.IsValidIndex(RightIdx)) continue; // Reason: bounds check
 
+        // Skip anti-roll bar force if either wheel is airborne (no ground reaction possible)
+        if (!AxleData.bIsInContact[LeftIdx] || !AxleData.bIsInContact[RightIdx]) continue; // Reason: wheels must be grounded
+
         // Calculate displacement and velocity asymmetry (roll-induced compression difference)
         const float DeltaDispM = (AxleData.SpringDisplacements[LeftIdx] - AxleData.SpringDisplacements[RightIdx]) * 0.01f; // [m] - Displacement difference
         const float DeltaVelMs = (AxleData.SpringVelocities[LeftIdx] - AxleData.SpringVelocities[RightIdx]) * 0.01f; // [m/s] - Velocity difference
@@ -4569,11 +4572,13 @@ constexpr float InvWheelInertia = 1.0f / WheelInertia;                       // 
 constexpr float OMEGA_LOCK_THRESHOLD = 0.1f;                                 // [rad⋅s⁻¹]
 
 //------------------------------------------------------------------------------
-// STICTION CONSTANTS (Simplified)
+// STICTION CONSTANTS (Karnopp Model)
 //------------------------------------------------------------------------------
-constexpr float STOP_VELOCITY_THRESHOLD = 0.2f;                              // [m⋅s⁻¹] - Below this, we attempt stiction
-constexpr float MU_STATIC = 1.0f;                                            // [-] - Static friction coefficient
+constexpr float VELOCITY_DEADBAND = 0.05f;                                   // [m⋅s⁻¹] - Dead-band for static re-entry
+const FVector2D MU_STATIC = FVector2D(1.0f, 0.95f);                          // [-] - Static friction (Long, Lat)
+const FVector2D MU_KINETIC = FVector2D(0.8f, 0.75f);                         // [-] - Kinetic friction (Long, Lat)
 constexpr float MIN_HOLDING_TORQUE = 5.0f;                                   // [N⋅m] - Min torque (drag/bearing) always present
+constexpr float GRAVITY_MS2 = 9.80f;                                         // [m⋅s⁻²] - Gravitational acceleration
 
 
 
@@ -4675,7 +4680,7 @@ const float Fz = AxleData.WheelLoads[i];                                     // 
 
 
 //------------------------------------------------------------------------------
-// STAGE 5: STATIC FRICTION GATE
+// STAGE 5: LATERAL FRICTION STATE MACHINE (Karnopp Model)
 //------------------------------------------------------------------------------
 const FVector GroundNormal = AxleData.AverageContactNormals[i];              // [-] - Actual surface normal
 const FVector F_gravity_world = FVector(0.0f, 0.0f, -Fz);                   // [N] - Weight force in world space
@@ -4686,55 +4691,113 @@ const float F_slope_lat = FVector::DotProduct(F_slope_N, WheelRight);       // [
 const float SafeRadius = FMath::Max(R, 0.01f);                               // [m]
 const float BrakeTorque = BrakeState.CurrentTorque;                          // [N⋅m]
 const float F_brake_capacity = BrakeTorque / SafeRadius;                     // [N]
-const float F_tire_limit = Fz * MU_STATIC;                                   // [N]
+const float F_breakaway_long = Fz * MU_STATIC.X;                             // [N] - Breakaway threshold (longitudinal)
+const float F_breakaway_lat = Fz * MU_STATIC.Y;                              // [N] - Breakaway threshold (lateral)
 
-constexpr float LOCK_SPEED_THRESHOLD = 0.5f;                                 // [m⋅s⁻¹]
 constexpr float MIN_BRAKE_LOCK = 10.0f;                                      // [N⋅m]
+const float EffectiveMass = Fz / GRAVITY_MS2;                                // [kg] - Mass on this wheel (from normal load)
 
-const bool bSlowEnough = v_contact_speed < LOCK_SPEED_THRESHOLD;             // [-]
-const bool bBrakesApplied = BrakeTorque > MIN_BRAKE_LOCK;                    // [-]
-const bool bCanHoldLong = F_tire_limit > FMath::Abs(F_slope_long) ;  // [-] PASSIVE: tire only
-const bool bCanHoldLat = F_tire_limit > FMath::Abs(F_slope_lat);             // [-]
+//------------------------------------------------------------------------------
+// LATERAL BREAKAWAY CHECK (Force-based, Karnopp style)
+//------------------------------------------------------------------------------
+// Calculate external lateral force demand from current velocity
+// F_demand = F_slope + F_inertial (where F_inertial ≈ m × v / Δt to stop)
+const float F_inertial_lat = EffectiveMass * FMath::Abs(Vy_Local) / FMath::Max(DeltaTime, 0.001f); // [N]
+const float F_demand_lat = FMath::Abs(F_slope_lat) + F_inertial_lat;         // [N] - Total force tire must resist
 
-// MODE 1: PASSIVE HOLD (tire friction alone)
-const bool bPassiveHold = bSlowEnough && bCanHoldLong && bCanHoldLat;       // [-] No brakes needed
+// STATIC→KINETIC: Force exceeds breakaway threshold
+const bool Fy_Breakaway = F_demand_lat > F_breakaway_lat;                    // [-]
 
-// MODE 2: BRAKE-ASSISTED HOLD (tire + brakes)
-const bool bBrakeHold = bSlowEnough && bBrakesApplied && 
-                        ((F_brake_capacity + F_tire_limit) > FMath::Abs(F_slope_long) ); // [-]
+// KINETIC→STATIC: Velocity in dead-band AND force counteracted
+const bool Vy_DeadbandEntry = FMath::Abs(Vy_Local) < VELOCITY_DEADBAND;      // [-]
+const bool Fy_Counteracted = FMath::Abs(F_slope_lat) < F_breakaway_lat;      // [-]
+const bool Fy_StaticEntry = Vy_DeadbandEntry && Fy_Counteracted;             // [-]
+
+//------------------------------------------------------------------------------
+// LONGITUDINAL BREAKAWAY CHECK (Force-based, Karnopp style)
+//------------------------------------------------------------------------------
+// Calculate drive force at contact patch: F = T / R
+const float T_drive_raw = AxleData.DriveTorquesNm[i] * FinalDriveEfficiency; // [N⋅m]
+const float F_drive = T_drive_raw / SafeRadius;                               // [N] - Drive force at contact patch
+
+// Calculate net longitudinal force (no inertial term - breakaway is force-based only)
+// Positive F_drive pushes forward, positive F_slope_long opposes forward motion on uphill
+// Breakaway occurs when: |F_drive - F_brake - F_slope| > μ_s × Fz
+const float F_net_long = F_drive - F_brake_capacity - F_slope_long;           // [N] - Net force demand (signed)
+
+// STATIC→KINETIC: Net force exceeds breakaway threshold (pure force check)
+const bool Fx_Breakaway = FMath::Abs(F_net_long) > F_breakaway_long;          // [-]
+
+// KINETIC→STATIC: Velocity in dead-band AND net force counteracted (dual condition)
+const bool Vx_DeadbandEntry = FMath::Abs(Vx_Local) < VELOCITY_DEADBAND;       // [-]
+const bool Fx_Counteracted = FMath::Abs(F_net_long) < F_breakaway_long;       // [-]
+const bool Fx_StaticEntry = Vx_DeadbandEntry && Fx_Counteracted;              // [-]
+
+// Brake hold: when brakes applied and net force (after brake) is within grip
+const bool BrakeActive = BrakeTorque > MIN_BRAKE_LOCK;                        // [-]
+const float F_net_after_brake = FMath::Abs(F_slope_long) - F_brake_capacity;  // [N]
+const bool BrakeCapacitySufficient = BrakeActive && (F_net_after_brake < F_breakaway_long); // [-]
+
+// Combined static lock condition
+const bool Fy_StaticLock = !Fy_Breakaway && Fy_StaticEntry;                   // [-]
+const bool Fx_StaticLock = !Fx_Breakaway && Fx_StaticEntry;                   // [-]
+const bool StaticLock = Fy_StaticLock && Fx_StaticLock;                       // [-]
+
+// Brake-assisted static lock (steep slopes or when brakes overcome drive)
+const bool BrakeStaticLock = BrakeActive && Vx_DeadbandEntry && BrakeCapacitySufficient && Fy_StaticEntry; // [-]
 
 float Fx_N = 0.0f;                                                           // [N]
 float Fy_N = 0.0f;                                                           // [N]
 float Mz_Nm = 0.0f;                                                          // [N⋅m]
 
-if (bPassiveHold || bBrakeHold) // Reason: Either mode activates static hold
+if (StaticLock || BrakeStaticLock) // Reason: Static friction regime
 {
+    //--------------------------------------------------------------------------
+    // STATIC HOLD: Apply stopping force via F=ma (preserves yaw/pitch)
+    //--------------------------------------------------------------------------
+    // Lateral stopping force: F = -m × v / Δt (exactly stops in one frame)
+    const float F_stop_lat = -EffectiveMass * Vy_Local / FMath::Max(DeltaTime, 0.001f); // [N]
+    const float F_stop_lat_clamped = FMath::Clamp(F_stop_lat, -F_breakaway_lat, F_breakaway_lat); // [N]
 
-    
-    Fx_N = -F_slope_long;                                                    // [N]
-    Fy_N = -F_slope_lat;                                                     // [N]
+    // Longitudinal stopping force
+    const float F_stop_long = -EffectiveMass * Vx_Local / FMath::Max(DeltaTime, 0.001f); // [N]
+    const float F_stop_long_clamped = FMath::Clamp(F_stop_long, -F_breakaway_long, F_breakaway_long); // [N]
+
+    // Total force = stopping force + counter-slope
+    Fx_N = F_stop_long_clamped + (-F_slope_long);                            // [N]
+    Fy_N = F_stop_lat_clamped + (-F_slope_lat);                              // [N]
+
+    // Clamp total to friction limit (friction circle)
+    const float F_total = FMath::Sqrt(Fx_N * Fx_N + Fy_N * Fy_N);            // [N]
+    if (F_total > F_breakaway_lat) // Reason: Exceeds friction circle
+    {
+        const float Scale = F_breakaway_lat / F_total;                       // [-]
+        Fx_N *= Scale;
+        Fy_N *= Scale;
+    } // End if (friction circle check)
+
     Mz_Nm = 0.0f;                                                            // [N⋅m]
-    
+
     AxleData.LongitudinalSlips[i] = 0.0f;                                    // [-]
     AxleData.SlipAnglesRad[i] = 0.0f;                                        // [rad]
     AxleData.LongitudinalForces[i] = Fx_N;                                   // [N]
     AxleData.LateralForces[i] = Fy_N;                                        // [N]
     AxleData.AngularVelocities[i] = 0.0f;                                    // [rad⋅s⁻¹]
     AxleData.WheelLocked[i] = true;                                          // [-]
-    
+
     bAnyWheelClamped = true;                                                 // [-]
 }
-else // Reason: Dynamic motion - use Pacejka
+else // Reason: Kinetic friction regime - use Pacejka
 {
     const float Camber = 0.0f;                                               // [rad]
     SolveContactSlip(i, DeltaTime, Rec, AxleData);
-    
+
     Fx_N = AxleData.LongitudinalForces[i];                                   // [N]
     Fy_N = AxleData.LateralForces[i];                                        // [N]
     Mz_Nm = ComputeSelfAligningTorque(i, AxleData.SlipAnglesRad[i], AxleData.LongitudinalSlips[i], Fy_N, Camber, AxleData); // [N⋅m]
-    
+
     AxleData.WheelLocked[i] = false;                                         // [-]
-} // End if (static vs dynamic check)
+} // End if (static vs kinetic check)
 //------------------------------------------------------------------------------
 // STAGE 6: APPLY TIRE FORCES TO CHASSIS
 //------------------------------------------------------------------------------
@@ -4748,7 +4811,7 @@ TotalTorqueCm += Rec.ê_vertical * (Mz_Nm * 100.0f);                         // 
 //------------------------------------------------------------------------------
 // STAGE 7: WHEEL ROTATION INTEGRATION
 //------------------------------------------------------------------------------
-const float T_drive = AxleData.DriveTorquesNm[i] * FinalDriveEfficiency;    // [N⋅m]
+const float T_drive = T_drive_raw;                                           // [N⋅m] - Reuse from breakaway calc
 const float T_tire = -Fx_N * R;                                              // [N⋅m]
 const float T_roll = -CoefficientOfRollingResistance * Fz * R * FMath::Sign(Omega); // [N⋅m]
 const float T_brake = -BrakeState.CurrentTorque * FMath::Sign(Omega);       // [N⋅m]
@@ -4804,13 +4867,13 @@ if (VehicleOwner && VehicleOwner->bEnableFrictionStateLogging && (VehicleOwner->
     Sample.DriveTorque_Nm = AxleData.DriveTorquesNm[i];                      // [N⋅m]
     Sample.F_Slope_Long_N = F_slope_long;                                    // [N]
     Sample.F_Slope_Lat_N = F_slope_lat;                                      // [N]
-    Sample.F_TireFrictionLimit_N = F_tire_limit;                             // [N]
+    Sample.F_TireFrictionLimit_N = F_breakaway_lat;                           // [N]
     Sample.F_MechHoldLimit_N = F_brake_capacity;                             // [N]
     Sample.Fx_Applied_N = Fx_N;                                              // [N]
     Sample.Fy_Applied_N = Fy_N;                                              // [N]
     Sample.WheelLoad_N = Fz;                                                 // [N]
-    Sample.bTireCanHoldLong = bCanHoldLong;                                  // [-]
-    Sample.bMechCanHoldLong = bCanHoldLong;                                  // [-]
+    Sample.bTireCanHoldLong = !Fx_Breakaway;                                 // [-]
+    Sample.bMechCanHoldLong = BrakeCapacitySufficient;                       // [-]
 
     VehicleOwner->FrictionStateSampleBuffer.Add(Sample);
 } // End if (friction logging check)

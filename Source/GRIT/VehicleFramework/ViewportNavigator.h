@@ -98,11 +98,12 @@ private:
     //--------------------------------------------------------------------------
     bool EnsureRequiredComponentsExist();
     float GetTraceDistance(UCameraComponent* Camera, FVector Direction, float MaxDistance);
+    float GetAdaptiveConeTrace(FVector Direction, float MaxDistance, float ConeAngleDeg,
+                               bool bTraceRight, bool bTraceLeft, bool bTraceUp, bool bTraceDown);
     float RestrictZoomByDistance(float CurrentLength, float DesiredLength, float Distance);
     void UpdateDistanceMeasurements();
     void InitializeCamera();
     bool CacheVehicleComponents();
-    FVector GetPanPivotLocation() const;
 
 public:
     //--------------------------------------------------------------------------
@@ -207,6 +208,9 @@ public:
     UPROPERTY(EditAnywhere, Category = "Camera Settings|Collision")
     float ProximityBuffer = 30.0f;                        // [cm]
 
+    UPROPERTY(EditAnywhere, Category = "Camera Settings|Collision")
+    float TraceConeAngle = 15.0f;                         // [deg] - Spread angle for cone traces
+
     //--------------------------------------------------------------------------
     //                          ANCHOR TRANSITION SETTINGS
     //--------------------------------------------------------------------------
@@ -225,23 +229,11 @@ public:
     UPROPERTY(BlueprintReadOnly, Category = "Camera State")
     float CurrentPitch = -10.0f;
 
-    UPROPERTY(BlueprintReadOnly, Category = "Camera State")
-    FVector2D TargetPanLocation;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Camera State")
-    float TargetZPosition = 0.0f;
-
     //--------------------------------------------------------------------------
     //                          INPUT STATE (READ-ONLY)
     //--------------------------------------------------------------------------
     UPROPERTY(BlueprintReadOnly, Category = "Input State")
     bool bIsMiddleMousePressed = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Input State")
-    bool bIsShiftPressed = false;
-
-    UPROPERTY(BlueprintReadOnly, Category = "Input State")
-    bool bIsPanning = false;
 
     UPROPERTY(BlueprintReadOnly, Category = "Input State")
     FVector2D CurrentPanInput;
@@ -254,19 +246,15 @@ private:
     USpringArmComponent* Arm = nullptr;
     UCameraComponent* Cam = nullptr;
 
-    FVector LastPanLoc = FVector::ZeroVector;
     bool bFirstRun = true;
     bool bBrakesLocked = false;                           // [-] - Brake lock state
 
     //--------------------------------------------------------------------------
-    //                          DISTANCE TRACKING
+    //                          PAN STATE (SpringArm offsets)
     //--------------------------------------------------------------------------
-    float ForwardDistance = 0.0f;
-    float RightDistance = 0.0f;
-    float UpDistance = 0.0f;
-    float LeftDistance = 0.0f;
-    float DownDistance = 0.0f;
-    float InverseForwardDistance = 0.0f;
+    FVector TargetSocketOffset = FVector::ZeroVector;     // [cm] - Target SocketOffset for panning
+    FVector TargetTargetOffset = FVector::ZeroVector;     // [cm] - Target TargetOffset for panning
+    FVector InitialSocketOffset = FVector::ZeroVector;    // [cm] - Original SocketOffset from VehicleConstruct
 
     //--------------------------------------------------------------------------
     //                          ANCHOR TRANSITION STATE
