@@ -4720,23 +4720,62 @@ const bool Fy_StaticEntry = Vy_DeadbandEntry && Fy_Counteracted;             // 
 const float T_drive_raw = AxleData.DriveTorquesNm[i] * FinalDriveEfficiency; // [N⋅m]
 const float F_drive = T_drive_raw / SafeRadius;                               // [N] - Drive force at contact patch
 
+/*=============================================================================
+    FIX: BRAKE DIRECTION LOGIC
+
+    Brake force must OPPOSE the direction of motion (or wheel spin).
+    When rolling backward (Vx < 0), brake adds positive force to decelerate.
+    When rolling forward (Vx > 0), brake adds negative force to decelerate.
+
+    At low speeds, use wheel omega sign as tiebreaker (prevents singularity).
+=============================================================================*/
+// Determine motion direction: prefer velocity, fall back to wheel omega at low speeds
+constexpr float MOTION_SIGN_THRESHOLD = 0.1f;                                // [m⋅s⁻¹]
+const float MotionSign = (FMath::Abs(Vx_Local) > MOTION_SIGN_THRESHOLD)
+    ? FMath::Sign(Vx_Local)
+    : FMath::Sign(Omega);                                                     // [-]
+
+// Brake force opposes motion: if moving forward, brake subtracts; if backward, brake adds
+const float F_brake_signed = F_brake_capacity * MotionSign;                   // [N]
+
 // Calculate net longitudinal force (no inertial term - breakaway is force-based only)
 // Positive F_drive pushes forward, positive F_slope_long opposes forward motion on uphill
 // Breakaway occurs when: |F_drive - F_brake - F_slope| > μ_s × Fz
-const float F_net_long = F_drive - F_brake_capacity - F_slope_long;           // [N] - Net force demand (signed)
+const float F_net_long = F_drive - F_brake_signed - F_slope_long;             // [N] - Net force demand (signed)
 
 // STATIC→KINETIC: Net force exceeds breakaway threshold (pure force check)
 const bool Fx_Breakaway = FMath::Abs(F_net_long) > F_breakaway_long;          // [-]
 
 // KINETIC→STATIC: Velocity in dead-band AND net force counteracted (dual condition)
 const bool Vx_DeadbandEntry = FMath::Abs(Vx_Local) < VELOCITY_DEADBAND;       // [-]
+const bool Omega_DeadbandEntry = FMath::Abs(Omega) < 2.0f;                    // [-] - Wheel nearly stopped
 const bool Fx_Counteracted = FMath::Abs(F_net_long) < F_breakaway_long;       // [-]
 const bool Fx_StaticEntry = Vx_DeadbandEntry && Fx_Counteracted;              // [-]
 
-// Brake hold: when brakes applied and net force (after brake) is within grip
+/*=============================================================================
+    BRAKE HOLD LOGIC (Improved)
+
+    Brake can hold the vehicle static if:
+    1. Brakes are actively applied (BrakeActive)
+    2. Vehicle/wheel is nearly stopped (velocity deadband + omega deadband)
+    3. Total hold capacity (brake + tire friction) exceeds slope demand
+
+    On flat ground (F_slope_long ≈ 0), any active brake is sufficient.
+=============================================================================*/
 const bool BrakeActive = BrakeTorque > MIN_BRAKE_LOCK;                        // [-]
-const float F_net_after_brake = FMath::Abs(F_slope_long) - F_brake_capacity;  // [N]
-const bool BrakeCapacitySufficient = BrakeActive && (F_net_after_brake < F_breakaway_long); // [-]
+
+// Total holding capacity = brake force + tire static friction
+const float F_total_hold_capacity = F_brake_capacity + F_breakaway_long;      // [N]
+
+// Brakes can hold if total capacity exceeds slope force
+const bool BrakeCanHoldSlope = F_total_hold_capacity > FMath::Abs(F_slope_long); // [-]
+
+// On flat ground (negligible slope), holding is easy
+constexpr float FLAT_GROUND_THRESHOLD = 50.0f;                                // [N] - Slope force below this = "flat"
+const bool FlatGroundBrakeHold = BrakeActive && (FMath::Abs(F_slope_long) < FLAT_GROUND_THRESHOLD); // [-]
+
+// Combined brake hold condition
+const bool BrakeCapacitySufficient = BrakeActive && (BrakeCanHoldSlope || FlatGroundBrakeHold); // [-]
 
 // Combined static lock condition
 const bool Fy_StaticLock = !Fy_Breakaway && Fy_StaticEntry;                   // [-]
@@ -4744,7 +4783,8 @@ const bool Fx_StaticLock = !Fx_Breakaway && Fx_StaticEntry;                   //
 const bool StaticLock = Fy_StaticLock && Fx_StaticLock;                       // [-]
 
 // Brake-assisted static lock (steep slopes or when brakes overcome drive)
-const bool BrakeStaticLock = BrakeActive && Vx_DeadbandEntry && BrakeCapacitySufficient && Fy_StaticEntry; // [-]
+// Now also requires wheel omega to be low (prevents lock-up at speed)
+const bool BrakeStaticLock = BrakeActive && Vx_DeadbandEntry && Omega_DeadbandEntry && BrakeCapacitySufficient && Fy_StaticEntry; // [-]
 
 float Fx_N = 0.0f;                                                           // [N]
 float Fy_N = 0.0f;                                                           // [N]
