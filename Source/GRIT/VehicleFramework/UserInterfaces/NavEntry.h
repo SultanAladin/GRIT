@@ -10,6 +10,8 @@
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnNavEntryClicked, class UNavEntry*, Entry);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnNavEntryHovered, class UNavEntry*, Entry);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnNavEntryUnhovered, class UNavEntry*, Entry);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnNavEntryPressed, class UNavEntry*, Entry);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnNavEntryReleased, class UNavEntry*, Entry);
 
 /*====================================================================================================================================
                                                          NAV ENTRY (Simplified - No Indicator)
@@ -55,6 +57,12 @@ public:
     UPROPERTY(BlueprintAssignable, Category = "Events")
     FOnNavEntryUnhovered OnEntryUnhovered;
 
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnNavEntryPressed OnEntryPressed;
+
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnNavEntryReleased OnEntryReleased;
+
     UFUNCTION(BlueprintImplementableEvent, Category = "Events")
     void OnEntryClickedBP();
 
@@ -73,6 +81,9 @@ protected:
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
     FLinearColor TextColor = FLinearColor::White;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+    FLinearColor HoverTextColor = FLinearColor(0.7f, 0.7f, 0.7f, 1.0f);
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
     FLinearColor ActiveTextColor = FLinearColor(1.0f, 0.194658f, 0.041635f, 1.0f);

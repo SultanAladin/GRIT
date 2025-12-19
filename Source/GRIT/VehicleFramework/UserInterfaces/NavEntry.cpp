@@ -55,8 +55,8 @@ void UNavEntry::SyncChrome()
         return;
     }
 
-    // Reason: Selection (Orange) takes precedence over Hover (White)
-    FLinearColor TargetColor = bIsSelected ? ActiveTextColor : (bIsHovered ? FLinearColor::White : TextColor); // [RGBA]
+    // Reason: Selection (Orange) takes precedence over Hover (Grey)
+    FLinearColor TargetColor = bIsSelected ? ActiveTextColor : (bIsHovered ? HoverTextColor : TextColor); // [RGBA]
 
     UE_LOG(LogTemp, Log, TEXT("[NavEntry] SyncChrome Index=%d - bIsSelected=%d, bIsHovered=%d -> Color=(%.2f,%.2f,%.2f)"),
         EntryIndex, bIsSelected, bIsHovered, TargetColor.R, TargetColor.G, TargetColor.B);
@@ -91,7 +91,7 @@ void UNavEntry::NativeOnMouseLeave(const FPointerEvent& MouseEvent)
     Super::NativeOnMouseLeave(MouseEvent);
     UE_LOG(LogTemp, Log, TEXT("[NavEntry] NativeOnMouseLeave - Index=%d, bIsSelected=%d"), EntryIndex, bIsSelected);
     bIsHovered = false;
-    bIsPressed = false;
+    // Reason: Don't clear bIsPressed - let MouseButtonUp handle it so clicks register
     SyncChrome();
 
     OnEntryUnhovered.Broadcast(this);
@@ -101,8 +101,23 @@ FReply UNavEntry::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPo
 {
     if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
     {
-        UE_LOG(LogTemp, Log, TEXT("[NavEntry] NativeOnMouseButtonDown - Index=%d"), EntryIndex);
+        UE_LOG(LogTemp, Warning, TEXT("[NavEntry] NativeOnMouseButtonDown - Index=%d, CLICK!"), EntryIndex);
         bIsPressed = true;
+        
+        // Reason: Broadcast pressed event so navbar can track click state
+        OnEntryPressed.Broadcast(this);
+        
+        // Reason: Fire click immediately on press (MouseButtonUp may not fire if cursor leaves)
+        OnEntryClicked.Broadcast(this);
+        OnEntryClickedBP();
+        
+        // Reason: Capture mouse for proper button release handling
+        TSharedPtr<SWidget> WidgetPtr = TakeWidget();
+        if (WidgetPtr.IsValid())
+        {
+            return FReply::Handled().CaptureMouse(WidgetPtr.ToSharedRef());
+        }
+        
         return FReply::Handled();
     }
 
@@ -111,13 +126,25 @@ FReply UNavEntry::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPo
 
 FReply UNavEntry::NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
 {
-    if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && bIsPressed)
+    if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
     {
-        UE_LOG(LogTemp, Warning, TEXT("[NavEntry] NativeOnMouseButtonUp - CLICK! Index=%d, Broadcasting OnEntryClicked"), EntryIndex);
+        // Reason: Always broadcast released event
+        OnEntryReleased.Broadcast(this);
+        
+        if (bIsPressed)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("[NavEntry] NativeOnMouseButtonUp - CLICK! Index=%d, Broadcasting OnEntryClicked"), EntryIndex);
+            bIsPressed = false;
+            OnEntryClicked.Broadcast(this);
+            OnEntryClickedBP();
+            
+            // Reason: Release mouse capture AFTER broadcasting
+            return FReply::Handled().ReleaseMouseCapture();
+        }
+        
+        // Reason: Clear pressed state and release capture even if click didn't register
         bIsPressed = false;
-        OnEntryClicked.Broadcast(this);
-        OnEntryClickedBP();
-        return FReply::Handled();
+        return FReply::Handled().ReleaseMouseCapture();
     }
 
     return Super::NativeOnMouseButtonUp(InGeometry, InMouseEvent);

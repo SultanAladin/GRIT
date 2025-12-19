@@ -90,11 +90,13 @@ private:
     FTimerHandle IndicatorAnimTimer;
     FTimerHandle ReturnToSelectedTimer; // Delayed return timer
     FTimerHandle InitRetryTimer; // Geometry readiness retry timer
+    FTimerHandle ClickTimeoutTimer; // Fallback to reset click state [s]
     float IndicatorAnimElapsed = 0.0f;
     bool bSizesCalculated = false;
     bool bInitComplete = false; // Full initialization status [-]
     int32 InitRetryCount = 0; // Geometry check attempts [-]
     float CachedItemSize = 0.0f; // Cached item width or height [px]
+    bool bClickInProgress = false; // Prevents indicator return during click [-]
     float IndicatorStartPos = 0.0f;
     float IndicatorTargetPos = 0.0f;
     bool bIsAnimatingIndicator = false;
@@ -113,10 +115,17 @@ private:
     void OnEntryClicked(UNavEntry* Entry);
 
     UFUNCTION()
+    void OnEntryPressed(UNavEntry* Entry);
+
+    UFUNCTION()
+    void OnEntryReleased(UNavEntry* Entry);
+
+    UFUNCTION()
     void AnimateIndicatorToEntry(UNavEntry* Entry);
 
     UFUNCTION()
     void OnEntryUnhovered(UNavEntry* Entry);
 
     void ReturnIndicatorToSelected();
+    void ResetClickState(); // Fallback timeout handler
 };

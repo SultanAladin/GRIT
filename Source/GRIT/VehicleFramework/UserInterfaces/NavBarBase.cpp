@@ -20,6 +20,7 @@ UNavBarBase::UNavBarBase(const FObjectInitializer& ObjectInitializer)
     , bInitComplete(false)
     , InitRetryCount(0)
     , CachedItemSize(0.0f)
+    , bClickInProgress(false)
     , IndicatorStartPos(0.0f)
     , IndicatorTargetPos(0.0f)
     , bIsAnimatingIndicator(false)
@@ -65,6 +66,7 @@ void UNavBarBase::NativeDestruct()
         if (IndicatorAnimTimer.IsValid()) { GetWorld()->GetTimerManager().ClearTimer(IndicatorAnimTimer); }
         if (ReturnToSelectedTimer.IsValid()) { GetWorld()->GetTimerManager().ClearTimer(ReturnToSelectedTimer); }
         if (InitRetryTimer.IsValid()) { GetWorld()->GetTimerManager().ClearTimer(InitRetryTimer); }
+        if (ClickTimeoutTimer.IsValid()) { GetWorld()->GetTimerManager().ClearTimer(ClickTimeoutTimer); }
     } // End if (timer cleanup)
 
     NavEntries.Empty();
@@ -87,10 +89,17 @@ void UNavBarBase::TryCompleteInit()
 {
     UE_LOG(LogTemp, Warning, TEXT("[NavBar] TryCompleteInit called - bInitComplete=%d, RetryCount=%d"), bInitComplete, InitRetryCount);
 
-    // Reason: Prevent infinite retry loop
-    if (bInitComplete || InitRetryCount >= 10)
+    // Reason: Prevent infinite retry loop (increased to 30 for slower geometry setup)
+    if (bInitComplete || InitRetryCount >= 30)
     {
-        UE_LOG(LogTemp, Warning, TEXT("[NavBar] TryCompleteInit EARLY EXIT - bInitComplete=%d, RetryCount=%d"), bInitComplete, InitRetryCount);
+        if (!bInitComplete && InitRetryCount >= 30)
+        {
+            UE_LOG(LogTemp, Error, TEXT("[NavBar] MAX RETRIES! Geometry never ready after 30 attempts."));
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("[NavBar] TryCompleteInit EARLY EXIT - bInitComplete=%d, RetryCount=%d"), bInitComplete, InitRetryCount);
+        }
         return;
     }
 
@@ -111,7 +120,7 @@ void UNavBarBase::TryCompleteInit()
 
         if (GetWorld())
         {
-            GetWorld()->GetTimerManager().SetTimer(InitRetryTimer, this, &UNavBarBase::TryCompleteInit, 0.033f, false);
+            GetWorld()->GetTimerManager().SetTimer(InitRetryTimer, this, &UNavBarBase::TryCompleteInit, 0.016f, false);
         }
 
         return;
@@ -129,7 +138,7 @@ void UNavBarBase::TryCompleteInit()
 
         if (GetWorld())
         {
-            GetWorld()->GetTimerManager().SetTimer(InitRetryTimer, this, &UNavBarBase::TryCompleteInit, 0.033f, false);
+            GetWorld()->GetTimerManager().SetTimer(InitRetryTimer, this, &UNavBarBase::TryCompleteInit, 0.016f, false);
         }
 
         return;
@@ -252,6 +261,8 @@ void UNavBarBase::AddNavEntry(TSubclassOf<UNavEntry> EntryClass)
 
     NewEntry->InitEntry(FText::AsNumber(EntryIndex + 1), FString::FromInt(EntryIndex), EntryIndex);
     NewEntry->OnEntryClicked.AddDynamic(this, &UNavBarBase::OnEntryClicked);
+    NewEntry->OnEntryPressed.AddDynamic(this, &UNavBarBase::OnEntryPressed);
+    NewEntry->OnEntryReleased.AddDynamic(this, &UNavBarBase::OnEntryReleased);
     NewEntry->OnEntryHovered.AddDynamic(this, &UNavBarBase::AnimateIndicatorToEntry);
     NewEntry->OnEntryUnhovered.AddDynamic(this, &UNavBarBase::OnEntryUnhovered);
 
@@ -472,18 +483,72 @@ void UNavBarBase::OnEntryClicked(UNavEntry* ClickedEntry)
     int32 ClickedIndex = ClickedEntry->GetEntryIndex();
     UE_LOG(LogTemp, Warning, TEXT("[NavBar] OnEntryClicked - ClickedIndex=%d, Current SelectedIndex=%d, HoveredIndex=%d"), ClickedIndex, SelectedIndex, HoveredIndex);
 
-    // Reason: DON'T reset HoveredIndex here; the mouse is still over the button!
-    // Just clear the return timer if it was pending from a weird jitter
-    if (GetWorld())
+    // Reason: Clear click timeout timer
+    if (GetWorld() && ClickTimeoutTimer.IsValid())
     {
-        UE_LOG(LogTemp, Log, TEXT("[NavBar] Clearing ReturnToSelectedTimer"));
+        GetWorld()->GetTimerManager().ClearTimer(ClickTimeoutTimer);
+    }
+    
+    // Reason: Clear return timer
+    if (GetWorld() && ReturnToSelectedTimer.IsValid())
+    {
         GetWorld()->GetTimerManager().ClearTimer(ReturnToSelectedTimer);
     }
 
     UE_LOG(LogTemp, Warning, TEXT("[NavBar] Calling SetSelectedIndex(%d)..."), ClickedIndex);
     SetSelectedIndex(ClickedIndex);
     UE_LOG(LogTemp, Warning, TEXT("[NavBar] OnEntryClicked COMPLETE - SelectedIndex is now %d"), SelectedIndex);
+    
+    // Reason: Reset click state immediately after selection
+    bClickInProgress = false;
 } // End if (OnEntryClicked)
+
+void UNavBarBase::OnEntryPressed(UNavEntry* PressedEntry)
+{
+    if (!PressedEntry) { return; }
+    
+    UE_LOG(LogTemp, Warning, TEXT("[NavBar] OnEntryPressed - Index=%d, Setting bClickInProgress=true"), PressedEntry->GetEntryIndex());
+    bClickInProgress = true;
+    
+    // Reason: Clear return timer if active
+    if (GetWorld() && ReturnToSelectedTimer.IsValid())
+    {
+        GetWorld()->GetTimerManager().ClearTimer(ReturnToSelectedTimer);
+    } // End if (timer cleanup)
+    
+    // Reason: Start timeout fallback in case MouseButtonUp never fires
+    if (GetWorld())
+    {
+        GetWorld()->GetTimerManager().SetTimer(ClickTimeoutTimer, this, &UNavBarBase::ResetClickState, 0.5f, false);
+    } // End if (timeout setup)
+} // End if (OnEntryPressed)
+
+void UNavBarBase::OnEntryReleased(UNavEntry* ReleasedEntry)
+{
+    if (!ReleasedEntry) { return; }
+    
+    UE_LOG(LogTemp, Warning, TEXT("[NavBar] OnEntryReleased - Index=%d, Setting bClickInProgress=false"), ReleasedEntry->GetEntryIndex());
+    
+    // Reason: Clear timeout timer since click completed normally
+    if (GetWorld() && ClickTimeoutTimer.IsValid())
+    {
+        GetWorld()->GetTimerManager().ClearTimer(ClickTimeoutTimer);
+    } // End if (timer cleanup)
+    
+    bClickInProgress = false;
+} // End if (OnEntryReleased)
+
+void UNavBarBase::ResetClickState()
+{
+    UE_LOG(LogTemp, Warning, TEXT("[NavBar] ResetClickState - TIMEOUT! Force clearing bClickInProgress"));
+    bClickInProgress = false;
+    
+    // Reason: Return indicator to selected after timeout
+    if (HoveredIndex == -1 && NavEntries.IsValidIndex(SelectedIndex))
+    {
+        AnimateIndicatorToIndex(SelectedIndex);
+    } // End if (return indicator)
+} // End if (ResetClickState)
 
 void UNavBarBase::AnimateIndicatorToEntry(UNavEntry* Entry)
 {
@@ -535,7 +600,14 @@ void UNavBarBase::OnEntryUnhovered(UNavEntry* Entry)
 
 void UNavBarBase::ReturnIndicatorToSelected()
 {
-    UE_LOG(LogTemp, Warning, TEXT("[NavBar] ReturnIndicatorToSelected called - HoveredIndex=%d, SelectedIndex=%d"), HoveredIndex, SelectedIndex);
+    UE_LOG(LogTemp, Warning, TEXT("[NavBar] ReturnIndicatorToSelected called - HoveredIndex=%d, SelectedIndex=%d, bClickInProgress=%d"), HoveredIndex, SelectedIndex, bClickInProgress);
+
+    // Reason: Don't return indicator during active click
+    if (bClickInProgress)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[NavBar] ReturnIndicatorToSelected - SKIPPED (Click in progress)"));
+        return;
+    } // End if (click check)
 
     // Reason: Target the NEW SelectedIndex confirmed by the click
     if (HoveredIndex == -1 && NavEntries.IsValidIndex(SelectedIndex))
