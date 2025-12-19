@@ -41,16 +41,26 @@ void UNavEntry::InitEntry(const FText& Label, const FString& Data, int32 Index)
 
 void UNavEntry::ToggleSelection(bool bState)
 {
+    UE_LOG(LogTemp, Log, TEXT("[NavEntry] ToggleSelection(%d) on Index=%d - WAS bIsSelected=%d"), bState, EntryIndex, bIsSelected);
     bIsSelected = bState;
     SyncChrome();
+    UE_LOG(LogTemp, Log, TEXT("[NavEntry] ToggleSelection DONE - Index=%d, bIsSelected=%d"), EntryIndex, bIsSelected);
 } // End if (Selection Toggle)
 
 void UNavEntry::SyncChrome()
 {
-    if (!EntryLabel) { return; }
+    if (!EntryLabel)
+    {
+        UE_LOG(LogTemp, Error, TEXT("[NavEntry] SyncChrome - EntryLabel is NULL! Index=%d"), EntryIndex);
+        return;
+    }
 
     // Reason: Selection (Orange) takes precedence over Hover (White)
     FLinearColor TargetColor = bIsSelected ? ActiveTextColor : (bIsHovered ? FLinearColor::White : TextColor); // [RGBA]
+
+    UE_LOG(LogTemp, Log, TEXT("[NavEntry] SyncChrome Index=%d - bIsSelected=%d, bIsHovered=%d -> Color=(%.2f,%.2f,%.2f)"),
+        EntryIndex, bIsSelected, bIsHovered, TargetColor.R, TargetColor.G, TargetColor.B);
+
     EntryLabel->SetColorAndOpacity(FSlateColor(TargetColor));
 
     if (EntryRoot)
@@ -69,6 +79,7 @@ void UNavEntry::SyncChrome()
 void UNavEntry::NativeOnMouseEnter(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)
 {
     Super::NativeOnMouseEnter(MyGeometry, MouseEvent);
+    UE_LOG(LogTemp, Log, TEXT("[NavEntry] NativeOnMouseEnter - Index=%d"), EntryIndex);
     bIsHovered = true;
     SyncChrome();
 
@@ -78,6 +89,7 @@ void UNavEntry::NativeOnMouseEnter(const FGeometry& MyGeometry, const FPointerEv
 void UNavEntry::NativeOnMouseLeave(const FPointerEvent& MouseEvent)
 {
     Super::NativeOnMouseLeave(MouseEvent);
+    UE_LOG(LogTemp, Log, TEXT("[NavEntry] NativeOnMouseLeave - Index=%d, bIsSelected=%d"), EntryIndex, bIsSelected);
     bIsHovered = false;
     bIsPressed = false;
     SyncChrome();
@@ -89,6 +101,7 @@ FReply UNavEntry::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPo
 {
     if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton)
     {
+        UE_LOG(LogTemp, Log, TEXT("[NavEntry] NativeOnMouseButtonDown - Index=%d"), EntryIndex);
         bIsPressed = true;
         return FReply::Handled();
     }
@@ -100,6 +113,7 @@ FReply UNavEntry::NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPoin
 {
     if (InMouseEvent.GetEffectingButton() == EKeys::LeftMouseButton && bIsPressed)
     {
+        UE_LOG(LogTemp, Warning, TEXT("[NavEntry] NativeOnMouseButtonUp - CLICK! Index=%d, Broadcasting OnEntryClicked"), EntryIndex);
         bIsPressed = false;
         OnEntryClicked.Broadcast(this);
         OnEntryClickedBP();

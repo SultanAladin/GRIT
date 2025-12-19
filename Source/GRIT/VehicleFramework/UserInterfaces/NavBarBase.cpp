@@ -74,6 +74,7 @@ void UNavBarBase::NativeDestruct()
 void UNavBarBase::NativeOnMouseLeave(const FPointerEvent& MouseEvent)
 {
     Super::NativeOnMouseLeave(MouseEvent);
+    UE_LOG(LogTemp, Warning, TEXT("[NavBar] NativeOnMouseLeave (whole navbar) - Setting HoveredIndex=-1, SelectedIndex=%d"), SelectedIndex);
     HoveredIndex = -1;
     ReturnIndicatorToSelected();
 }
@@ -84,51 +85,67 @@ void UNavBarBase::NativeOnMouseLeave(const FPointerEvent& MouseEvent)
 
 void UNavBarBase::TryCompleteInit()
 {
-    // Reason: Prevent infinite retry loop
-    if (bInitComplete || InitRetryCount >= 10) { return; }
+    UE_LOG(LogTemp, Warning, TEXT("[NavBar] TryCompleteInit called - bInitComplete=%d, RetryCount=%d"), bInitComplete, InitRetryCount);
 
-    if (!RootOverlay || !SlidingIndicator || NavEntries.Num() == 0) { return; }
+    // Reason: Prevent infinite retry loop
+    if (bInitComplete || InitRetryCount >= 10)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[NavBar] TryCompleteInit EARLY EXIT - bInitComplete=%d, RetryCount=%d"), bInitComplete, InitRetryCount);
+        return;
+    }
+
+    if (!RootOverlay || !SlidingIndicator || NavEntries.Num() == 0)
+    {
+        UE_LOG(LogTemp, Error, TEXT("[NavBar] TryCompleteInit FAIL - RootOverlay=%d, Indicator=%d, Entries=%d"), RootOverlay != nullptr, SlidingIndicator != nullptr, NavEntries.Num());
+        return;
+    }
 
     FVector2D OverlaySize = RootOverlay->GetCachedGeometry().GetLocalSize(); // [px]
+    UE_LOG(LogTemp, Warning, TEXT("[NavBar] TryCompleteInit - OverlaySize=(%.1f, %.1f)"), OverlaySize.X, OverlaySize.Y);
 
     // Reason: Geometry not ready - schedule retry
     if (OverlaySize.X <= 1.0f)
     {
         InitRetryCount++;
-        
+        UE_LOG(LogTemp, Warning, TEXT("[NavBar] Geometry not ready, scheduling retry #%d"), InitRetryCount);
+
         if (GetWorld())
         {
             GetWorld()->GetTimerManager().SetTimer(InitRetryTimer, this, &UNavBarBase::TryCompleteInit, 0.033f, false);
         }
-        
+
         return;
     } // End if (geometry not ready)
 
     // Reason: Geometry ready - calculate sizes
     RecalcEntrySizes();
-    
+    UE_LOG(LogTemp, Warning, TEXT("[NavBar] After RecalcEntrySizes - bSizesCalculated=%d, CachedItemSize=%.1f"), bSizesCalculated, CachedItemSize);
+
     // Reason: Verify sizes calculated successfully
     if (!bSizesCalculated)
     {
         InitRetryCount++;
-        
+        UE_LOG(LogTemp, Warning, TEXT("[NavBar] Sizes not calculated, scheduling retry #%d"), InitRetryCount);
+
         if (GetWorld())
         {
             GetWorld()->GetTimerManager().SetTimer(InitRetryTimer, this, &UNavBarBase::TryCompleteInit, 0.033f, false);
         }
-        
+
         return;
     } // End if (sizes not calculated)
-    
+
     // Reason: Snap indicator to initial position without animation
     int32 TargetIndex = FMath::Clamp(DefaultSelectedIndex, 0, NavEntries.Num() - 1);
     float SnapPos = CalculateIndicatorPosition(TargetIndex); // [px]
-    
+
+    UE_LOG(LogTemp, Warning, TEXT("[NavBar] INIT COMPLETE - DefaultSelectedIndex=%d, TargetIndex=%d, SnapPos=%.1f"), DefaultSelectedIndex, TargetIndex, SnapPos);
+
     UpdateIndicatorTransform(SnapPos);
-    
+
     // Reason: Set init complete BEFORE calling SetSelectedIndex so animation works
     bInitComplete = true;
-    
+
     // Reason: Update selection state and text colors
     SetSelectedIndex(TargetIndex);
 
@@ -136,6 +153,8 @@ void UNavBarBase::TryCompleteInit()
     {
         SlidingIndicator->SetVisibility(ESlateVisibility::HitTestInvisible);
     }
+
+    UE_LOG(LogTemp, Warning, TEXT("[NavBar] === INITIALIZATION COMPLETE === SelectedIndex=%d"), SelectedIndex);
 }
 
 //------------------------------------------------------------------------------
@@ -272,16 +291,43 @@ void UNavBarBase::ClearEntries()
 
 void UNavBarBase::SetSelectedIndex(int32 Index)
 {
-    if (!NavEntries.IsValidIndex(Index)) { return; }
+    UE_LOG(LogTemp, Warning, TEXT("[NavBar] ========== SetSelectedIndex(%d) CALLED =========="), Index);
+    UE_LOG(LogTemp, Warning, TEXT("[NavBar] BEFORE: SelectedIndex=%d, HoveredIndex=%d, bSizesCalculated=%d, bInitComplete=%d"), SelectedIndex, HoveredIndex, bSizesCalculated, bInitComplete);
 
+    if (!NavEntries.IsValidIndex(Index))
+    {
+        UE_LOG(LogTemp, Error, TEXT("[NavBar] SetSelectedIndex REJECTED - Index %d not valid (Entries=%d)"), Index, NavEntries.Num());
+        return;
+    }
+
+    int32 OldSelectedIndex = SelectedIndex;
     SelectedIndex = Index;
 
+    UE_LOG(LogTemp, Warning, TEXT("[NavBar] Selection changed: %d -> %d"), OldSelectedIndex, SelectedIndex);
+
     // Reason: Update all entries; 1-line logic for selection state
-    for (int32 i = 0; i < NavEntries.Num(); i++) { if (NavEntries[i]) NavEntries[i]->ToggleSelection(i == SelectedIndex); }
+    for (int32 i = 0; i < NavEntries.Num(); i++)
+    {
+        if (NavEntries[i])
+        {
+            bool bShouldSelect = (i == SelectedIndex);
+            UE_LOG(LogTemp, Log, TEXT("[NavBar]   Entry[%d] ToggleSelection(%d)"), i, bShouldSelect);
+            NavEntries[i]->ToggleSelection(bShouldSelect);
+        }
+    }
 
     // Reason: Only animate if geometry is ready
-    if (bSizesCalculated) { AnimateIndicatorToIndex(SelectedIndex); }
+    if (bSizesCalculated)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[NavBar] Calling AnimateIndicatorToIndex(%d) - CachedItemSize=%.1f"), SelectedIndex, CachedItemSize);
+        AnimateIndicatorToIndex(SelectedIndex);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("[NavBar] SKIPPING AnimateIndicatorToIndex - bSizesCalculated=FALSE!"));
+    }
 
+    UE_LOG(LogTemp, Warning, TEXT("[NavBar] AFTER SetSelectedIndex: SelectedIndex=%d"), SelectedIndex);
     OnSelectionChanged.Broadcast(SelectedIndex, NavEntries[SelectedIndex]->GetEntryData());
 } // End if (SetSelectedIndex)
 
@@ -291,14 +337,25 @@ void UNavBarBase::SetSelectedIndex(int32 Index)
 
 void UNavBarBase::AnimateIndicatorToIndex(int32 Index)
 {
-    if (!SlidingIndicator || Index < 0 || Index >= NavEntries.Num()) { return; }
+    UE_LOG(LogTemp, Warning, TEXT("[NavBar] AnimateIndicatorToIndex(%d) called"), Index);
+
+    if (!SlidingIndicator || Index < 0 || Index >= NavEntries.Num())
+    {
+        UE_LOG(LogTemp, Error, TEXT("[NavBar] AnimateIndicatorToIndex REJECTED - Indicator=%d, Index=%d, Entries=%d"), SlidingIndicator != nullptr, Index, NavEntries.Num());
+        return;
+    }
 
     if (!bSizesCalculated || CachedItemSize <= 0.0f)
     {
+        UE_LOG(LogTemp, Warning, TEXT("[NavBar] Sizes not ready, recalculating..."));
         RecalcEntrySizes();
-        
+
         // Reason: Still not ready after recalc
-        if (!bSizesCalculated || CachedItemSize <= 0.0f) { return; }
+        if (!bSizesCalculated || CachedItemSize <= 0.0f)
+        {
+            UE_LOG(LogTemp, Error, TEXT("[NavBar] AnimateIndicatorToIndex ABORT - Still no sizes after recalc"));
+            return;
+        }
     } // End if (sizes not ready)
 
     FVector2D CurrentTranslation = SlidingIndicator->GetRenderTransform().Translation;
@@ -306,11 +363,19 @@ void UNavBarBase::AnimateIndicatorToIndex(int32 Index)
 
     IndicatorTargetPos = CalculateIndicatorPosition(Index); // [px]
 
+    UE_LOG(LogTemp, Warning, TEXT("[NavBar] Animation: StartPos=%.1f -> TargetPos=%.1f (Index=%d, ItemSize=%.1f)"), IndicatorStartPos, IndicatorTargetPos, Index, CachedItemSize);
+
     // Reason: Already at target position
-    if (FMath::IsNearlyEqual(IndicatorStartPos, IndicatorTargetPos, 0.1f)) { return; }
+    if (FMath::IsNearlyEqual(IndicatorStartPos, IndicatorTargetPos, 0.1f))
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[NavBar] AnimateIndicatorToIndex SKIP - Already at target position"));
+        return;
+    }
 
     IndicatorAnimElapsed = 0.0f; // [s]
     bIsAnimatingIndicator = true;
+
+    UE_LOG(LogTemp, Warning, TEXT("[NavBar] Starting animation timer..."));
 
     if (GetWorld())
     {
@@ -396,48 +461,90 @@ void UNavBarBase::UpdateIndicatorTransform(float Position)
 
 void UNavBarBase::OnEntryClicked(UNavEntry* ClickedEntry)
 {
-    if (!ClickedEntry) { return; }
+    UE_LOG(LogTemp, Warning, TEXT("[NavBar] >>>>>> OnEntryClicked <<<<<<"));
+
+    if (!ClickedEntry)
+    {
+        UE_LOG(LogTemp, Error, TEXT("[NavBar] OnEntryClicked - ClickedEntry is NULL!"));
+        return;
+    }
+
+    int32 ClickedIndex = ClickedEntry->GetEntryIndex();
+    UE_LOG(LogTemp, Warning, TEXT("[NavBar] OnEntryClicked - ClickedIndex=%d, Current SelectedIndex=%d, HoveredIndex=%d"), ClickedIndex, SelectedIndex, HoveredIndex);
 
     // Reason: DON'T reset HoveredIndex here; the mouse is still over the button!
     // Just clear the return timer if it was pending from a weird jitter
-    if (GetWorld()) { GetWorld()->GetTimerManager().ClearTimer(ReturnToSelectedTimer); }
+    if (GetWorld())
+    {
+        UE_LOG(LogTemp, Log, TEXT("[NavBar] Clearing ReturnToSelectedTimer"));
+        GetWorld()->GetTimerManager().ClearTimer(ReturnToSelectedTimer);
+    }
 
-    SetSelectedIndex(ClickedEntry->GetEntryIndex());
+    UE_LOG(LogTemp, Warning, TEXT("[NavBar] Calling SetSelectedIndex(%d)..."), ClickedIndex);
+    SetSelectedIndex(ClickedIndex);
+    UE_LOG(LogTemp, Warning, TEXT("[NavBar] OnEntryClicked COMPLETE - SelectedIndex is now %d"), SelectedIndex);
 } // End if (OnEntryClicked)
 
 void UNavBarBase::AnimateIndicatorToEntry(UNavEntry* Entry)
 {
     if (Entry)
     {
-        HoveredIndex = Entry->GetEntryIndex();
-        
+        int32 EntryIndex = Entry->GetEntryIndex();
+        UE_LOG(LogTemp, Log, TEXT("[NavBar] AnimateIndicatorToEntry - EntryIndex=%d (hover), SelectedIndex=%d"), EntryIndex, SelectedIndex);
+
+        HoveredIndex = EntryIndex;
+
         // Reason: Cancel any pending return-to-selected timer
         if (GetWorld() && ReturnToSelectedTimer.IsValid())
         {
             GetWorld()->GetTimerManager().ClearTimer(ReturnToSelectedTimer);
         } // End if (timer cleanup)
-        
+
         AnimateIndicatorToIndex(HoveredIndex);
     }
 }
 
 void UNavBarBase::OnEntryUnhovered(UNavEntry* Entry)
 {
-    // Reason: Verify this is the entry we were actually tracking
-    if (Entry && Entry->GetEntryIndex() == HoveredIndex)
+    if (!Entry)
     {
+        UE_LOG(LogTemp, Error, TEXT("[NavBar] OnEntryUnhovered - Entry is NULL!"));
+        return;
+    }
+
+    int32 EntryIndex = Entry->GetEntryIndex();
+    UE_LOG(LogTemp, Warning, TEXT("[NavBar] OnEntryUnhovered - EntryIndex=%d, HoveredIndex=%d, SelectedIndex=%d"), EntryIndex, HoveredIndex, SelectedIndex);
+
+    // Reason: Verify this is the entry we were actually tracking
+    if (EntryIndex == HoveredIndex)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[NavBar] OnEntryUnhovered - Clearing HoveredIndex, scheduling return to SelectedIndex=%d"), SelectedIndex);
         HoveredIndex = -1;
 
         // Reason: Short delay to catch fast mouse movements across entries [s]
-        if (GetWorld()) { GetWorld()->GetTimerManager().SetTimer(ReturnToSelectedTimer, this, &UNavBarBase::ReturnIndicatorToSelected, 0.05f, false); }
+        if (GetWorld())
+        {
+            GetWorld()->GetTimerManager().SetTimer(ReturnToSelectedTimer, this, &UNavBarBase::ReturnIndicatorToSelected, 0.05f, false);
+        }
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[NavBar] OnEntryUnhovered - IGNORED (EntryIndex %d != HoveredIndex %d)"), EntryIndex, HoveredIndex);
     } // End if (Hover Check)
 } // End if (OnEntryUnhovered)
 
 void UNavBarBase::ReturnIndicatorToSelected()
 {
+    UE_LOG(LogTemp, Warning, TEXT("[NavBar] ReturnIndicatorToSelected called - HoveredIndex=%d, SelectedIndex=%d"), HoveredIndex, SelectedIndex);
+
     // Reason: Target the NEW SelectedIndex confirmed by the click
     if (HoveredIndex == -1 && NavEntries.IsValidIndex(SelectedIndex))
     {
+        UE_LOG(LogTemp, Warning, TEXT("[NavBar] ReturnIndicatorToSelected - Animating to SelectedIndex=%d"), SelectedIndex);
         AnimateIndicatorToIndex(SelectedIndex);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[NavBar] ReturnIndicatorToSelected - SKIPPED (HoveredIndex=%d or SelectedIndex=%d invalid)"), HoveredIndex, SelectedIndex);
     } // End if (Return Logic)
 }
