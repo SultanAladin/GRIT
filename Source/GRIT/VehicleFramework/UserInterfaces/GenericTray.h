@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "UIToolkit.h"
 #include "GenericTray.generated.h"
 
 class UVerticalBox;
@@ -33,6 +34,7 @@ public:
     FOnTrayToggled OnTrayToggled;
 
 protected:
+    virtual void NativePreConstruct() override;
     virtual void NativeConstruct() override;
     virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
@@ -55,17 +57,26 @@ private:
     //------------------------------------------------------------------------------
     // Configuration
     //------------------------------------------------------------------------------
-    UPROPERTY(EditAnywhere, Category = "Tray", meta = (AllowPrivateAccess = "true"))
-    float AnimDuration = 0.32f;          // [s] - Smooth expansion time
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tray|Animation", meta = (AllowPrivateAccess = "true"))
+    float AnimDuration = 0.3f;          // [s] - Animation duration (FIXED: was 0.32f)
 
-    UPROPERTY(EditAnywhere, Category = "Tray", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tray|Animation", meta = (AllowPrivateAccess = "true"))
+    EFlowCurve AnimationCurve = EFlowCurve::QuadOut; // Animation easing curve (FIXED: was hardcoded)
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tray|Sizing", meta = (AllowPrivateAccess = "true"))
     float TargetWidth = 300.0f;          // [px] - Expanded panel width
 
-    UPROPERTY(EditAnywhere, Category = "Tray", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tray|Sizing", meta = (AllowPrivateAccess = "true"))
     float TargetPanelHeight = 200.0f;    // [px] - Expanded panel height
 
-    UPROPERTY(EditAnywhere, Category = "Tray", meta = (AllowPrivateAccess = "true"))
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tray|Sizing", meta = (AllowPrivateAccess = "true"))
     FVector2D Margin = FVector2D(8.0f, 8.0f);  // [px] - Extra spacing around button when collapsed
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tray|Sizing", meta = (AllowPrivateAccess = "true"))
+    bool bAutoSizeFromButton = true;     // Auto-detect button size instead of using arbitrary defaults
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tray|Sizing", meta = (AllowPrivateAccess = "true"))
+    bool bAutoSizeFromContent = true;    // Auto-detect content size instead of using TargetWidth/Height
 
     //------------------------------------------------------------------------------
     // Measured Dimensions
@@ -74,6 +85,7 @@ private:
     float CachedButtonWidth = 0.0f;      // [px] - Button-only width (collapsed state)
     float CachedContentHeight = 0.0f;    // [px] - Full content height (expanded state)
     float CachedContentWidth = 0.0f;     // [px] - Full content width (expanded state)
+    bool bDimensionsCached = false;      // [-] - Whether dimensions have been measured
 
     //------------------------------------------------------------------------------
     // Runtime State
@@ -93,6 +105,9 @@ private:
     /** Drive size animation each frame */
     void DriveMotion(float DeltaTime);
 
-    /** Smooth cubic easing curve */
-    float BlendCurve(float t) const;
+    /** Measure button and content dimensions */
+    void CacheDimensions();
+
+    /** Apply initial collapsed size */
+    void ApplyCollapsedSize();
 };

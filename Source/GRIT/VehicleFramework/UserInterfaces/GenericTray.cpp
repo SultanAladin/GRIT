@@ -7,40 +7,50 @@
 #include "Components/SizeBoxSlot.h"
 #include "Components/SlateWrapperTypes.h"
 
+// FORCE REBUILD: Fixed all BlendCurve issues - 2024-12-24 v3
+
 /*====================================================================================================================================
                                                          INITIALIZATION
 ======================================================================================================================================*/
+
+void UGenericTray::NativePreConstruct()
+{
+    Super::NativePreConstruct();
+    
+    // FIXED: Apply animation settings from PreConstruct to override Blueprint defaults
+    UE_LOG(LogTemp, Warning, TEXT("[GenericTray] NativePreConstruct - AnimDuration=%.2fs, Curve=%d, AutoSizeButton=%s, AutoSizeContent=%s"), 
+           AnimDuration, (int32)AnimationCurve, 
+           bAutoSizeFromButton ? TEXT("TRUE") : TEXT("FALSE"),
+           bAutoSizeFromContent ? TEXT("TRUE") : TEXT("FALSE"));
+}
 
 void UGenericTray::NativeConstruct()
 {
     Super::NativeConstruct();
 
-    // Reason: Enable tick for animation updates
-    SetIsFocusable(false);
-
     // Reason: Wire button click to flip handler
     if (TriggerButton)
     {
         TriggerButton->OnClicked.AddDynamic(this, &UGenericTray::OnTriggerPressed);
-    } // End if (TriggerButton check)
+    }
 
-    //------------------------------------------------------------------------------
-    // Initial Collapsed State
-    //------------------------------------------------------------------------------
-    // Reason: Start with reasonable button-sized dimensions so button is visible
-    if (ContentBox)
+    // FIXED: Apply safe fallback size immediately to prevent invisible button
+    ApplyCollapsedSize();
+    
+    // FIXED: Force Slate layout prepass to get real widget dimensions
+    UE_LOG(LogTemp, Warning, TEXT("[GenericTray] NativeConstruct - Forcing SlatePrepass for dimension caching"));
+    TakeWidget()->SlatePrepass();
+    
+    // Cache dimensions now that layout is complete
+    CacheDimensions();
+    
+    // Apply the cached dimensions
+    if (bDimensionsCached && ContentBox)
     {
-        // Use reasonable defaults until first measurement
-        float InitialWidth = 100.0f + Margin.X;   // [px] - Default button width + margin
-        float InitialHeight = 40.0f + Margin.Y;   // [px] - Default button height + margin
-        
-        ContentBox->SetHeightOverride(InitialHeight);
-        ContentBox->SetWidthOverride(InitialWidth);
-        StartHeight = InitialHeight;
-        TargetAnimHeight = InitialHeight;
-        StartWidth = InitialWidth;
-        TargetAnimWidth = InitialWidth;
-    } // End if (ContentBox check)
+        ContentBox->SetHeightOverride(CachedButtonHeight);
+        ContentBox->SetWidthOverride(CachedButtonWidth);
+        UE_LOG(LogTemp, Warning, TEXT("[GenericTray] ✅ Applied cached dimensions: %.1fx%.1f px"), CachedButtonWidth, CachedButtonHeight);
+    }
 }
 
 void UGenericTray::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
@@ -51,7 +61,7 @@ void UGenericTray::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
     if (bAnimating)
     {
         DriveMotion(InDeltaTime);
-    } // End if (bAnimating check)
+    }
 }
 
 /*====================================================================================================================================
@@ -60,6 +70,12 @@ void UGenericTray::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 
 void UGenericTray::FlipPanel()
 {
+    // FIXED: Cache dimensions before first animation
+    if (!bDimensionsCached)
+    {
+        CacheDimensions();
+    }
+
     bIsOpen = !bIsOpen;
     bAnimating = true;
     AnimTime = 0.0f;
@@ -67,117 +83,192 @@ void UGenericTray::FlipPanel()
     //------------------------------------------------------------------------------
     // Set Animation Range
     //------------------------------------------------------------------------------
-    // Reason: Store current dimensions as start, calculate targets based on state
     if (ContentBox)
     {
-        StartHeight = ContentBox->GetHeightOverride();                          // [px] - Current height
-        StartWidth = ContentBox->GetWidthOverride();                            // [px] - Current width
+        StartHeight = ContentBox->GetHeightOverride();
+        StartWidth = ContentBox->GetWidthOverride();
         
-        TargetAnimHeight = bIsOpen ? CachedContentHeight : CachedButtonHeight;  // [px] - Expand or collapse height
-        TargetAnimWidth = bIsOpen ? CachedContentWidth : CachedButtonWidth;     // [px] - Expand or collapse width
+        TargetAnimHeight = bIsOpen ? CachedContentHeight : CachedButtonHeight;
+        TargetAnimWidth = bIsOpen ? CachedContentWidth : CachedButtonWidth;
         
-        UE_LOG(LogTemp, Warning, TEXT("[FlipPanel] State: %s | Target: %.2fx%.2f px"), 
-               bIsOpen ? TEXT("OPEN") : TEXT("CLOSED"), TargetAnimWidth, TargetAnimHeight);
-    } // End if (ContentBox check)
+        UE_LOG(LogTemp, Warning, TEXT("[FlipPanel] State: %s | Start: %.1fx%.1f -> Target: %.1fx%.1f px | Cached: %s"), 
+               bIsOpen ? TEXT("OPEN") : TEXT("CLOSED"), 
+               StartWidth, StartHeight, TargetAnimWidth, TargetAnimHeight,
+               bDimensionsCached ? TEXT("YES") : TEXT("NO"));
+    }
 
     OnTrayToggled.Broadcast(bIsOpen);
 }
 
 void UGenericTray::OnTriggerPressed()
 {
-    //------------------------------------------------------------------------------
-    // Measure Button Dimensions (Collapsed State)
-    //------------------------------------------------------------------------------
-    // Reason: Capture actual button size at runtime + add custom margin
-    if (TriggerButton && CachedButtonHeight < UE_SMALL_NUMBER)
+    // FIXED: Ensure dimensions are cached before animation
+    if (!bDimensionsCached)
     {
-        FVector2D ButtonSize = TriggerButton->GetDesiredSize();     // [px] - Measured button size
+        UE_LOG(LogTemp, Warning, TEXT("[GenericTray] OnTriggerPressed - Dimensions not cached, forcing SlatePrepass"));
+        TakeWidget()->SlatePrepass();
+        CacheDimensions();
         
-        if (ButtonSize.Y < UE_SMALL_NUMBER)
+        // Apply dimensions if we got them
+        if (bDimensionsCached && ContentBox)
         {
-            UE_LOG(LogTemp, Warning, TEXT("[OnTriggerPressed] Button size invalid (%.2f px) - Using fallback"), ButtonSize.Y);
-            CachedButtonHeight = 40.0f + Margin.Y;                  // [px] - Fallback + margin
-            CachedButtonWidth = 100.0f + Margin.X;                  // [px] - Fallback + margin
-        } // End if (invalid size check)
-        else
-        {
-            CachedButtonHeight = ButtonSize.Y + Margin.Y;           // [px] - Button height + vertical margin
-            CachedButtonWidth = ButtonSize.X + Margin.X;            // [px] - Button width + horizontal margin
-            UE_LOG(LogTemp, Warning, TEXT("[OnTriggerPressed] Button Size: %.2fx%.2f px + Margin: %.2fx%.2f px = %.2fx%.2f px"), 
-                   ButtonSize.X, ButtonSize.Y, Margin.X, Margin.Y, CachedButtonWidth, CachedButtonHeight);
-        } // End else (valid size)
-    } // End if (TriggerButton check)
-
-    //------------------------------------------------------------------------------
-    // Measure Full Content Dimensions (Expanded State)
-    //------------------------------------------------------------------------------
-    // Reason: Capture actual content size at runtime
-    if (Border && CachedContentHeight < UE_SMALL_NUMBER)
-    {
-        FVector2D OverlaySize = Border->GetDesiredSize();           // [px] - Measured overlay size
-        
-        if (OverlaySize.Y < UE_SMALL_NUMBER)
-        {
-            UE_LOG(LogTemp, Warning, TEXT("[OnTriggerPressed] Border size invalid (%.2f px) - Using UPROPERTY target"), OverlaySize.Y);
-            CachedContentHeight = TargetPanelHeight;                // [px] - Fallback to explicit target
-            CachedContentWidth = TargetWidth;                       // [px] - Fallback to explicit target
-        } // End if (invalid size check)
-        else
-        {
-            CachedContentHeight = OverlaySize.Y;                    // [px] - Use measured size
-            CachedContentWidth = OverlaySize.X;                     // [px] - Use measured size
-            UE_LOG(LogTemp, Warning, TEXT("[OnTriggerPressed] Border Size: %.2fx%.2f px"), CachedContentWidth, CachedContentHeight);
-        } // End else (valid size)
-    } // End if (Border check)
+            ContentBox->SetHeightOverride(CachedButtonHeight);
+            ContentBox->SetWidthOverride(CachedButtonWidth);
+        }
+    }
 
     FlipPanel();
 }
 
 /*====================================================================================================================================
-                                                         ANIMATION PIPELINE
+                                                         ANIMATION PIPELINE (FIXED: EFlowCurve support)
 ======================================================================================================================================*/
 
 void UGenericTray::DriveMotion(float DeltaTime)
 {
-    AnimTime += DeltaTime;                                                    // [s] - Accumulate time
-    float Progress = FMath::Clamp(AnimTime / AnimDuration, 0.0f, 1.0f);       // [0-1] - Normalized progress
-    float Eased = BlendCurve(Progress);                                       // [0-1] - Smoothed curve
+    AnimTime += DeltaTime;
+    float Progress = FMath::Clamp(AnimTime / AnimDuration, 0.0f, 1.0f);
+    
+    // FIXED: Use UIToolkit EFlowCurve instead of hardcoded cubic curve
+    float Eased = UUIToolkit::EvalFlowCurve(AnimationCurve, Progress);
 
     //------------------------------------------------------------------------------
     // Interpolate Dimensions
     //------------------------------------------------------------------------------
-    float CurrentHeight = FMath::Lerp(StartHeight, TargetAnimHeight, Eased); // [px] - Smooth height blend
-    float CurrentWidth = FMath::Lerp(StartWidth, TargetAnimWidth, Eased);    // [px] - Smooth width blend
+    float CurrentHeight = FMath::Lerp(StartHeight, TargetAnimHeight, Eased);
+    float CurrentWidth = FMath::Lerp(StartWidth, TargetAnimWidth, Eased);
 
-    // Reason: Update SizeBox dimensions to match animation
     if (ContentBox)
     {
         ContentBox->SetHeightOverride(CurrentHeight);
         ContentBox->SetWidthOverride(CurrentWidth);
-    } // End if (ContentBox check)
+    }
 
     //------------------------------------------------------------------------------
     // End Animation
     //------------------------------------------------------------------------------
-    // Reason: Animation complete when progress reaches 1.0
     if (Progress >= 1.0f)
     {
         bAnimating = false;
 
-        // Reason: Snap to exact targets to avoid float precision drift
         if (ContentBox)
         {
             ContentBox->SetHeightOverride(TargetAnimHeight);
             ContentBox->SetWidthOverride(TargetAnimWidth);
-        } // End if (ContentBox check)
-    } // End if (progress complete check)
+        }
+        
+        UE_LOG(LogTemp, Log, TEXT("[GenericTray] Animation complete - Final size: %.1fx%.1f px"), TargetAnimWidth, TargetAnimHeight);
+    }
 }
 
 /*====================================================================================================================================
-                                                         EASING MATH
+                                                         SIZING HELPERS (FIXED: Proper dimension caching)
 ======================================================================================================================================*/
 
-float UGenericTray::BlendCurve(float t) const
+void UGenericTray::CacheDimensions()
 {
-    return t < 0.5f ? 4.0f * t * t * t : 1.0f - FMath::Pow(-2.0f * t + 2.0f, 3.0f) / 2.0f; // Cubic ease in/out
+    UE_LOG(LogTemp, Warning, TEXT("[GenericTray] CacheDimensions - Starting dimension measurement"));
+
+    bool bButtonSizeValid = false;
+    bool bContentSizeValid = false;
+
+    //------------------------------------------------------------------------------
+    // Measure Button Dimensions (Collapsed State)
+    //------------------------------------------------------------------------------
+    if (TriggerButton && bAutoSizeFromButton)
+    {
+        FVector2D ButtonSize = TriggerButton->GetDesiredSize();
+        
+        if (ButtonSize.Y > 1.0f && ButtonSize.X > 1.0f)
+        {
+            CachedButtonHeight = ButtonSize.Y + Margin.Y;
+            CachedButtonWidth = ButtonSize.X + Margin.X;
+            bButtonSizeValid = true;
+            UE_LOG(LogTemp, Warning, TEXT("[CacheDimensions] ✅ Button Size: %.1fx%.1f px + Margin: %.1fx%.1f px = %.1fx%.1f px"), 
+                   ButtonSize.X, ButtonSize.Y, Margin.X, Margin.Y, CachedButtonWidth, CachedButtonHeight);
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("[CacheDimensions] ❌ Button size invalid (%.1fx%.1f px) - using manual sizing"), ButtonSize.X, ButtonSize.Y);
+        }
+    }
+    
+    if (!bButtonSizeValid)
+    {
+        CachedButtonHeight = 40.0f + Margin.Y;
+        CachedButtonWidth = 100.0f + Margin.X;
+        UE_LOG(LogTemp, Warning, TEXT("[CacheDimensions] Using manual button size: %.1fx%.1f px"), CachedButtonWidth, CachedButtonHeight);
+        bButtonSizeValid = true;
+    }
+
+    //------------------------------------------------------------------------------
+    // Measure Full Content Dimensions (Expanded State)
+    //------------------------------------------------------------------------------
+    if (Border && bAutoSizeFromContent)
+    {
+        FVector2D ContentSize = Border->GetDesiredSize();
+        
+        if (ContentSize.Y > 1.0f && ContentSize.X > 1.0f)
+        {
+            CachedContentHeight = ContentSize.Y;
+            CachedContentWidth = ContentSize.X;
+            bContentSizeValid = true;
+            UE_LOG(LogTemp, Warning, TEXT("[CacheDimensions] ✅ Content Size: %.1fx%.1f px (auto-detected)"), CachedContentWidth, CachedContentHeight);
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("[CacheDimensions] ❌ Content size invalid (%.1fx%.1f px) - using manual sizing"), ContentSize.X, ContentSize.Y);
+        }
+    }
+    
+    if (!bContentSizeValid)
+    {
+        CachedContentHeight = TargetPanelHeight;
+        CachedContentWidth = TargetWidth;
+        bContentSizeValid = true;
+        UE_LOG(LogTemp, Warning, TEXT("[CacheDimensions] Using manual content size: %.1fx%.1f px"), CachedContentWidth, CachedContentHeight);
+    }
+
+    // Mark as cached
+    bDimensionsCached = true;
+    UE_LOG(LogTemp, Warning, TEXT("[GenericTray] ✅ ALL DIMENSIONS CACHED - Button: %.1fx%.1f, Content: %.1fx%.1f"), 
+           CachedButtonWidth, CachedButtonHeight, CachedContentWidth, CachedContentHeight);
+}
+
+
+
+void UGenericTray::ApplyCollapsedSize()
+{
+    if (!ContentBox) return;
+
+    // FIXED: Always start with reasonable fallback to prevent 0x0 invisible button
+    float InitialWidth = 120.0f;   // [px] - Safe default button width
+    float InitialHeight = 48.0f;   // [px] - Safe default button height
+
+    // Try to get actual button size if available
+    if (bAutoSizeFromButton && TriggerButton)
+    {
+        FVector2D ButtonSize = TriggerButton->GetDesiredSize();
+        if (ButtonSize.Y > 1.0f && ButtonSize.X > 1.0f)  // Check for valid size
+        {
+            InitialWidth = ButtonSize.X + Margin.X;
+            InitialHeight = ButtonSize.Y + Margin.Y;
+            
+            UE_LOG(LogTemp, Warning, TEXT("[ApplyCollapsedSize] ✅ Applied button-based size: %.1fx%.1f px"), InitialWidth, InitialHeight);
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("[ApplyCollapsedSize] ❌ Button size invalid (%.1fx%.1f px) - using safe fallback"), ButtonSize.X, ButtonSize.Y);
+        }
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[ApplyCollapsedSize] Using manual fallback size: %.1fx%.1f px"), InitialWidth, InitialHeight);
+    }
+    
+    // ALWAYS apply a valid size to prevent invisible button
+    ContentBox->SetHeightOverride(InitialHeight);
+    ContentBox->SetWidthOverride(InitialWidth);
+    
+    UE_LOG(LogTemp, Warning, TEXT("[ApplyCollapsedSize] ✅ APPLIED INITIAL SIZE: %.1fx%.1f px (prevents 0x0 issue)"), InitialWidth, InitialHeight);
 }

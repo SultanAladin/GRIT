@@ -8,12 +8,13 @@
 #include "Components/VerticalBox.h"
 #include "Components/Image.h"
 #include "NavEntry.h"
+#include "UIToolkit.h"
 #include "NavBarBase.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnNavSelectionChanged, int32, SelectedIndex, const FString&, SelectedData);
 
 /*====================================================================================================================================
-                                                         NAVBAR BASE (Sliding Indicator)
+                                                         NAVBAR BASE (Config-Driven Sliding Indicator)
 ======================================================================================================================================*/
 
 UCLASS(Blueprintable, BlueprintType)
@@ -24,9 +25,13 @@ class GRIT_API UNavBarBase : public UUserWidget
 public:
     UNavBarBase(const FObjectInitializer& ObjectInitializer);
 
-    /** Add entry from Blueprint class */
+    /** Add entry from Blueprint class with custom config */
     UFUNCTION(BlueprintCallable, Category = "NavBar")
-    void AddNavEntry(TSubclassOf<UNavEntry> EntryClass);
+    void AddNavEntry(TSubclassOf<UNavEntry> EntryClass, const FNavEntryConfig& Config);
+
+    /** Add entry from Blueprint class with default config */
+    UFUNCTION(BlueprintCallable, Category = "NavBar")
+    void AddNavEntrySimple(TSubclassOf<UNavEntry> EntryClass);
 
     /** Set selected entry by index */
     UFUNCTION(BlueprintCallable, Category = "NavBar")
@@ -64,8 +69,15 @@ protected:
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
     UImage* SlidingIndicator;
 
+    //------------------------------------------------------------------------------
+    // Entry configuration array
+    //------------------------------------------------------------------------------
+
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config|Items")
-    TArray<TSubclassOf<UNavEntry>> DefaultEntries;
+    TArray<FNavEntryConfig> EntryConfigs;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config|Items")
+    TSubclassOf<UNavEntry> DefaultEntryClass;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config|Selection")
     int32 DefaultSelectedIndex = 0;
@@ -74,32 +86,37 @@ protected:
     FLinearColor IndicatorColor = FLinearColor(1.0f, 0.194658f, 0.041635f, 1.0f);
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config|Appearance")
-    float IndicatorThickness = 2.0f;
+    float IndicatorThickness = 2.0f; // [px]
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config|Animation")
-    float IndicatorAnimDuration = 0.3f;
+    float IndicatorAnimDuration = 0.3f; // [s]
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config|Animation")
+    EFlowCurve IndicatorAnimCurve = EFlowCurve::QuadOut; // Animation easing curve
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Config|Spacing")
     FMargin EntryPadding = FMargin(0.0f, 0.0f);
 
 private:
-    bool bIsHorizontal = true;
-    int32 SelectedIndex = -1;
-    int32 HoveredIndex = -1; // Track which entry is currently hovered [-]
+    bool bIsHorizontal = true;                  // [-]
+    int32 SelectedIndex = -1;                   // [-]
+    int32 HoveredIndex = -1;                    // [-]
+    bool bNavBarHovered = false;                // [-]
     TArray<UNavEntry*> NavEntries;
     FTimerHandle IndicatorAnimTimer;
-    FTimerHandle ReturnToSelectedTimer; // Delayed return timer
-    FTimerHandle InitRetryTimer; // Geometry readiness retry timer
-    FTimerHandle ClickTimeoutTimer; // Fallback to reset click state [s]
-    float IndicatorAnimElapsed = 0.0f;
-    bool bSizesCalculated = false;
-    bool bInitComplete = false; // Full initialization status [-]
-    int32 InitRetryCount = 0; // Geometry check attempts [-]
-    float CachedItemSize = 0.0f; // Cached item width or height [px]
-    bool bClickInProgress = false; // Prevents indicator return during click [-]
-    float IndicatorStartPos = 0.0f;
-    float IndicatorTargetPos = 0.0f;
-    bool bIsAnimatingIndicator = false;
+    FTimerHandle ReturnToSelectedTimer;         // [s]
+    FTimerHandle InitRetryTimer;                // [s]
+    FTimerHandle ClickTimeoutTimer;             // [s]
+    FTimerHandle CollapseDelayTimer;            // [s]
+    float IndicatorAnimElapsed = 0.0f;          // [s]
+    bool bSizesCalculated = false;              // [-]
+    bool bInitComplete = false;                 // [-]
+    int32 InitRetryCount = 0;                   // [-]
+    float CachedItemSize = 0.0f;                // [px]
+    bool bClickInProgress = false;              // [-]
+    float IndicatorStartPos = 0.0f;             // [px]
+    float IndicatorTargetPos = 0.0f;            // [px]
+    bool bIsAnimatingIndicator = false;         // [-]
 
     void DetermineOrientation();
     void ConfigureSlotProperties();
@@ -109,7 +126,7 @@ private:
     void TickIndicatorAnimation();
     float CalculateIndicatorPosition(int32 Index);
     void UpdateIndicatorTransform(float Position);
-    void TryCompleteInit(); // Attempt full setup with geometry check
+    void TryCompleteInit();
 
     UFUNCTION()
     void OnEntryClicked(UNavEntry* Entry);
@@ -127,5 +144,7 @@ private:
     void OnEntryUnhovered(UNavEntry* Entry);
 
     void ReturnIndicatorToSelected();
-    void ResetClickState(); // Fallback timeout handler
+    void ResetClickState();
+    void ExpandAllEntries(bool bExpand);
+    void ScheduleCollapseAll();
 };
