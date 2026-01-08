@@ -64,6 +64,17 @@ VehicleFramework/
 | Game State | Game Thread | `*_GT` suffix |
 | Telemetry | Game Thread (Buffered) | `F*Sample` |
 
+### 1.4 Quick Reference Snapshot
+| Topic | Details |
+|-------|---------|
+| Physics Tick Budget | 120 Hz baseline. PT work must complete < 8.3 ms to preserve Chaos determinism. |
+| Coordinate Spaces | World transforms live on PT. Convert through `FVehicleInstantaneousKinematics` before touching GT widgets/tools. |
+| Data Flow | Specs → `*_PT` mutable state → `*_GT` copies → Telemetry CSV / UI. Never mutate specs at runtime. |
+| Instrumentation | Enable `bDumpTelemetry` on `AVehicleSolver` to stream `Telemetry/*.csv`. Use in-editor console: `VehicleSolver.LogTelemetry 1`. |
+| Debugging Hooks | `VehicleSolver.DebugDraw` toggles force vectors. `VehicleConstruct::RequestViewportNavigator()` attaches the WIP camera system. |
+| Safety Nets | All solver subsystems clamp inputs using unit-aware helpers (`ClampForce_N`, `ClampTorque_Nm`). Favor them over raw `FMath::Clamp`. |
+| TODO Hotspots | 1) Replication pipeline, 2) VehicleConfigurator, 3) UI/HUD (see Context.md). |
+
 ---
 
 ## 2. CORE CLASSES

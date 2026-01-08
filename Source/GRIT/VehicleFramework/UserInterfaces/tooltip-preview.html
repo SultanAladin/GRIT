@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Tooltip Button Preview</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 40px;
+            padding: 20px;
+        }
+
+        .demo-section {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 40px;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+        }
+
+        h1 {
+            color: #ffffff;
+            text-align: center;
+            margin-bottom: 20px;
+            font-size: 24px;
+            font-weight: 300;
+        }
+
+        .controls {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .control-group label {
+            color: #ffffff;
+            font-size: 12px;
+            font-weight: 300;
+        }
+
+        .control-group select {
+            background: #191919;
+            color: #ffffff;
+            border: 1px solid #333;
+            border-radius: 5px;
+            padding: 8px 12px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        .button-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100px;
+        }
+
+        /* Info Button - Matching .tsx styling */
+        .info-button {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            background: #191919;
+            border: none;
+            border-radius: 10px;
+            padding: 5px;
+            cursor: pointer;
+            transition: transform 0.2s ease-in-out;
+            position: relative;
+            transform-origin: center;
+        }
+
+        .info-button:hover {
+            transform: scale(1.15);
+        }
+
+        .info-button.linear:hover { transition-timing-function: linear; }
+        .info-button.exponential:hover { transition-timing-function: cubic-bezier(0.22, 0.61, 0.36, 1); }
+        .info-button.cubic:hover { transition-timing-function: cubic-bezier(0.33, 0, 0.67, 1); }
+        .info-button.ease-in-out:hover { transition-timing-function: ease-in-out; }
+        .info-button.bounce:hover { 
+            animation: bounce 0.4s ease-in-out;
+        }
+
+        @keyframes bounce {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.2); }
+            75% { transform: scale(1.1); }
+        }
+
+        .arrow-indicator {
+            width: 10px;
+            height: 21px;
+            background: #191919;
+            position: relative;
+        }
+
+        .arrow-indicator::after {
+            content: '▶';
+            color: #191919;
+            font-size: 10px;
+            position: absolute;
+            left: 0;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+
+        .info-text-container {
+            background: #191919;
+            border-radius: 10px;
+            padding: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .info-text {
+            color: #ffffff;
+            font-size: 15px;
+            font-weight: 300;
+            padding: 5px;
+        }
+
+        /* Tooltip styling - matching .tsx */
+        .tooltip {
+            position: fixed;
+            background: #191919;
+            border-radius: 10px;
+            padding: 10px;
+            max-width: 300px;
+            pointer-events: none;
+            opacity: 0;
+            transform: translateY(10px);
+            transition: opacity 0.2s ease-in-out, transform 0.2s ease-in-out;
+            z-index: 9999;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4);
+        }
+
+        .tooltip.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        
+        .tooltip.no-slide {
+            transition: opacity 0s, transform 0s;
+        }
+        
+        #directionControl {
+            opacity: 0.5;
+            pointer-events: none;
+        }
+        
+        #directionControl.active {
+            opacity: 1;
+            pointer-events: all;
+        }
+
+        .tooltip-text {
+            color: #ffffff;
+            font-size: 15px;
+            font-weight: 300;
+            line-height: 1.4;
+        }
+
+        /* Demo info */
+        .info-panel {
+            background: rgba(25, 25, 25, 0.8);
+            border-radius: 10px;
+            padding: 20px;
+            color: #ffffff;
+            max-width: 600px;
+            margin-top: 20px;
+        }
+
+        .info-panel h2 {
+            font-size: 18px;
+            font-weight: 300;
+            margin-bottom: 15px;
+            color: #ffffff;
+        }
+
+        .info-panel ul {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .info-panel li {
+            font-size: 14px;
+            font-weight: 300;
+            margin-bottom: 8px;
+            padding-left: 20px;
+            position: relative;
+        }
+
+        .info-panel li::before {
+            content: '→';
+            position: absolute;
+            left: 0;
+            color: #666;
+        }
+
+        .code-preview {
+            background: #0d0d0d;
+            border-radius: 5px;
+            padding: 15px;
+            margin-top: 15px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            color: #00ff00;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="demo-section">
+        <h1>Interactive Tooltip Button Preview</h1>
+        
+        <div class="controls">
+            <div class="control-group">
+                <label>Scale Curve:</label>
+                <select id="curveSelect">
+                    <option value="ease-in-out">Ease In-Out</option>
+                    <option value="linear">Linear</option>
+                    <option value="exponential">Exponential</option>
+                    <option value="cubic">Cubic</option>
+                    <option value="bounce">Bounce</option>
+                </select>
+            </div>
+            
+            <div class="control-group">
+                <label>Scale Duration:</label>
+                <select id="durationSelect">
+                    <option value="0.1">0.1s (Fast)</option>
+                    <option value="0.2" selected>0.2s (Default)</option>
+                    <option value="0.3">0.3s (Smooth)</option>
+                    <option value="0.5">0.5s (Slow)</option>
+                </select>
+            </div>
+            
+            <div class="control-group">
+                <label>Hover Scale:</label>
+                <select id="scaleSelect">
+                    <option value="1.05">1.05x (Subtle)</option>
+                    <option value="1.15" selected>1.15x (Default)</option>
+                    <option value="1.25">1.25x (Dramatic)</option>
+                </select>
+            </div>
+            
+            <div class="control-group">
+                <label>Tooltip Placement:</label>
+                <select id="placementSelect">
+                    <option value="cursor">At Cursor</option>
+                    <option value="widget-edge">Widget Edge</option>
+                </select>
+            </div>
+            
+            <div class="control-group" id="directionControl">
+                <label>Tooltip Direction:</label>
+                <select id="directionSelect">
+                    <option value="right">Right</option>
+                    <option value="left">Left</option>
+                    <option value="above">Above</option>
+                    <option value="below">Below</option>
+                </select>
+            </div>
+            
+            <div class="control-group">
+                <label>Slide Animation:</label>
+                <select id="slideSelect">
+                    <option value="false">Disabled</option>
+                    <option value="true">Enabled</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="button-container">
+            <button class="info-button ease-in-out" id="infoButton">
+                <div class="arrow-indicator"></div>
+                <div class="info-text-container">
+                    <span class="info-text">Information</span>
+                </div>
+            </button>
+        </div>
+    </div>
+
+    <div class="info-panel">
+        <h2>Implementation Details</h2>
+        <ul>
+            <li>Button scales on hover (currently 1.15x with ease-in-out)</li>
+            <li>Tooltip appears after 200ms hover delay</li>
+            <li>Tooltip placement: At Cursor or Widget Edge</li>
+            <li>Widget Edge directions: Right, Left, Above, Below</li>
+            <li>At Cursor: Follows mouse with offset (default 15px)</li>
+            <li>Widget Edge: Spawns at specified edge + offset</li>
+            <li>Slide animation: Optional (disabled by default in C++)</li>
+            <li>Slide in HTML: CSS transition (opacity + transform)</li>
+            <li>Slide in UE5: Requires UWidgetAnimation or manual interpolation</li>
+            <li>Color theme: #191919 (RGB 0.098958)</li>
+            <li>Font: 15pt, Light weight, White text</li>
+            <li>Border radius: 10px rounded corners</li>
+        </ul>
+        
+        <div class="code-preview">
+// C++ Usage Example:<br>
+InteractButton->HoverScale = 1.15f;<br>
+InteractButton->ScaleDuration = 0.2f;<br>
+InteractButton->ScaleType = EScaleCurve::EaseInOut;<br>
+InteractButton->InteractTooltipText = FText::FromString("Your info");<br>
+InteractButton->TooltipWidgetClass = WBP_InfoTooltip;<br>
+InteractButton->TooltipPlacement = ETooltipPlacement::WidgetEdge;<br>
+InteractButton->TooltipDirection = ETooltipDirection::Right;<br>
+InteractButton->TooltipOffset = FVector2D(20.0f, 0.0f);<br>
+InteractButton->bEnableSlideAnimation = false; // Optional
+        </div>
+    </div>
+
+    <div class="tooltip" id="tooltip">
+        <div class="tooltip-text" id="tooltipText">
+            This is helpful information about the EOS login settings. You can customize authentication methods, session timeouts, and security parameters here. Hover over different elements to learn more about each setting.
+        </div>
+    </div>
+
+    <script>
+        const button = document.getElementById('infoButton');
+        const tooltip = document.getElementById('tooltip');
+        const curveSelect = document.getElementById('curveSelect');
+        const durationSelect = document.getElementById('durationSelect');
+        const scaleSelect = document.getElementById('scaleSelect');
+        const placementSelect = document.getElementById('placementSelect');
+        const directionSelect = document.getElementById('directionSelect');
+        const directionControl = document.getElementById('directionControl');
+        const slideSelect = document.getElementById('slideSelect');
+        
+        let hoverTimeout;
+        let tooltipPlacement = 'cursor';
+        let tooltipDirection = 'right';
+        let slideAnimationEnabled = false;
+
+        // Update button styling based on controls
+        function updateButtonStyle() {
+            const curve = curveSelect.value;
+            const duration = durationSelect.value;
+            const scale = scaleSelect.value;
+            
+            button.className = `info-button ${curve}`;
+            button.style.transitionDuration = `${duration}s`;
+            
+            // Update CSS variable for scale
+            document.documentElement.style.setProperty('--hover-scale', scale);
+            
+            // Apply scale via transform
+            const style = document.createElement('style');
+            style.textContent = `.info-button:hover { transform: scale(${scale}) !important; }`;
+            document.head.appendChild(style);
+        }
+
+        curveSelect.addEventListener('change', updateButtonStyle);
+        durationSelect.addEventListener('change', updateButtonStyle);
+        scaleSelect.addEventListener('change', updateButtonStyle);
+        
+        placementSelect.addEventListener('change', (e) => {
+            tooltipPlacement = e.target.value;
+            
+            if (tooltipPlacement === 'widget-edge') // Enable direction control
+            {
+                directionControl.classList.add('active');
+            }
+            else
+            {
+                directionControl.classList.remove('active');
+            }
+        });
+        
+        directionSelect.addEventListener('change', (e) => {
+            tooltipDirection = e.target.value;
+        });
+        
+        slideSelect.addEventListener('change', (e) => {
+            slideAnimationEnabled = e.target.value === 'true';
+            
+            if (slideAnimationEnabled)
+            {
+                tooltip.classList.remove('no-slide');
+            }
+            else
+            {
+                tooltip.classList.add('no-slide');
+            }
+        });
+
+        // Tooltip positioning
+        button.addEventListener('mouseenter', (e) => {
+            hoverTimeout = setTimeout(() => {
+                tooltip.classList.add('visible');
+                
+                if (tooltipPlacement === 'widget-edge') // Position at widget edge
+                {
+                    const buttonRect = button.getBoundingClientRect();
+                    const tooltipRect = tooltip.getBoundingClientRect();
+                    const tooltipOffsetX = 20; // [px] - Margin
+                    const tooltipOffsetY = 0;  // [px] - Center offset
+                    
+                    let posX, posY;
+                    let transformOrigin = '';
+                    
+                    switch (tooltipDirection)
+                    {
+                        case 'right': // Spawn at right edge, centered vertically
+                            posX = buttonRect.right + tooltipOffsetX;
+                            posY = buttonRect.top + buttonRect.height / 2;
+                            transformOrigin = 'translateY(-50%)';
+                            
+                            if (slideAnimationEnabled)
+                            {
+                                tooltip.style.transform = 'translateY(-50%) translateX(-10px)';
+                                setTimeout(() => { tooltip.style.transform = 'translateY(-50%) translateX(0)'; }, 50);
+                            }
+                            else
+                            {
+                                tooltip.style.transform = transformOrigin;
+                            }
+                            break;
+                            
+                        case 'left': // Spawn at left edge, centered vertically
+                            posX = buttonRect.left - tooltipRect.width - tooltipOffsetX;
+                            posY = buttonRect.top + buttonRect.height / 2;
+                            transformOrigin = 'translateY(-50%)';
+                            
+                            if (slideAnimationEnabled)
+                            {
+                                tooltip.style.transform = 'translateY(-50%) translateX(10px)';
+                                setTimeout(() => { tooltip.style.transform = 'translateY(-50%) translateX(0)'; }, 50);
+                            }
+                            else
+                            {
+                                tooltip.style.transform = transformOrigin;
+                            }
+                            break;
+                            
+                        case 'above': // Spawn above, centered horizontally
+                            posX = buttonRect.left + buttonRect.width / 2;
+                            posY = buttonRect.top - tooltipRect.height - tooltipOffsetY;
+                            transformOrigin = 'translateX(-50%)';
+                            
+                            if (slideAnimationEnabled)
+                            {
+                                tooltip.style.transform = 'translateX(-50%) translateY(10px)';
+                                setTimeout(() => { tooltip.style.transform = 'translateX(-50%) translateY(0)'; }, 50);
+                            }
+                            else
+                            {
+                                tooltip.style.transform = transformOrigin;
+                            }
+                            break;
+                            
+                        case 'below': // Spawn below, centered horizontally
+                            posX = buttonRect.left + buttonRect.width / 2;
+                            posY = buttonRect.bottom + tooltipOffsetY;
+                            transformOrigin = 'translateX(-50%)';
+                            
+                            if (slideAnimationEnabled)
+                            {
+                                tooltip.style.transform = 'translateX(-50%) translateY(-10px)';
+                                setTimeout(() => { tooltip.style.transform = 'translateX(-50%) translateY(0)'; }, 50);
+                            }
+                            else
+                            {
+                                tooltip.style.transform = transformOrigin;
+                            }
+                            break;
+                    }
+                    
+                    tooltip.style.left = posX + 'px';
+                    tooltip.style.top = posY + 'px';
+                }
+            }, 200);
+        });
+
+        button.addEventListener('mousemove', (e) => {
+            if (tooltipPlacement === 'cursor' && tooltip.classList.contains('visible')) // Follow cursor
+            {
+                const tooltipOffsetX = 15; // [px]
+                const tooltipOffsetY = 15; // [px]
+                
+                tooltip.style.left = (e.clientX + tooltipOffsetX) + 'px';
+                tooltip.style.top = (e.clientY + tooltipOffsetY) + 'px';
+                
+                if (slideAnimationEnabled)
+                {
+                    tooltip.style.transform = 'translateY(0) translateX(0)';
+                }
+                else
+                {
+                    tooltip.style.transform = 'translateY(0)';
+                }
+            }
+        });
+
+        button.addEventListener('mouseleave', () => {
+            clearTimeout(hoverTimeout);
+            tooltip.classList.remove('visible');
+        });
+
+        // Initialize
+        updateButtonStyle();
+        tooltip.classList.add('no-slide'); // Start with no animation
+    </script>
+</body>
+</html>

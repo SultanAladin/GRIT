@@ -1,126 +1,250 @@
 // SessionAdapter.cpp - Game Instance implementation
-
 #include "SessionAdapter.h"
-#include "ColourCodex/Public/ColourCodex.h"
+#include "UserPreferences.h"
 
 USessionAdapter::USessionAdapter()
 {
-    // Initialize with default theme
-    InitializeDefaultTheme();
+    BootstrapDefaultTheme();
+    PreferencesMgr = CreateDefaultSubobject<UUserPreferencesManager>(TEXT("PreferencesMgr"));
 }
 
 void USessionAdapter::Init()
 {
     Super::Init();
 
-    // Ensure ColourCodex is initialized
-    UColourCodex::Get();
+    if (PreferencesMgr) // Reason: Initialize preferences manager
+    {
+        PreferencesMgr->Initialize();
+        
+        bool bLoaded = PreferencesMgr->LoadUserPreferences();
+        if (bLoaded) // Reason: Apply loaded preferences
+        {
+            UE_LOG(LogTemp, Log, TEXT("SessionAdapter: Preferences loaded"));
+            PreferencesMgr->ApplyPreferencesToGlobalManagers();
+        } // End if (Loaded check)
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("SessionAdapter: Using default preferences"));
+        }
+    } // End if (PreferencesMgr check)
 
-    UE_LOG(LogTemp, Log, TEXT("SessionAdapter initialized with default theme"));
+    UE_LOG(LogTemp, Log, TEXT("SessionAdapter: Initialized with default theme"));
 }
 
 void USessionAdapter::Shutdown()
 {
-    UE_LOG(LogTemp, Log, TEXT("SessionAdapter shutting down"));
+    UE_LOG(LogTemp, Log, TEXT("SessionAdapter: Shutting down"));
     Super::Shutdown();
 }
 
-void USessionAdapter::SetThemeConfiguration(const FThemeConfiguration& NewTheme)
+void USessionAdapter::SetTheme(const FThemeConfig& NewTheme)
 {
-    PlayerTheme = NewTheme;
-    OnThemeChanged.Broadcast(PlayerTheme);
+    ActiveTheme = NewTheme;
+    OnThemeChanged.Broadcast(ActiveTheme);
 }
 
-void USessionAdapter::SetColorProfile(const FColorProfile& NewColorProfile)
+void USessionAdapter::SetPalette(const FPalette& NewPalette)
 {
-    PlayerTheme.ColorProfile = NewColorProfile;
-    OnThemeChanged.Broadcast(PlayerTheme);
+    ActiveTheme.Palette = NewPalette;
+    OnThemeChanged.Broadcast(ActiveTheme);
 }
 
-void USessionAdapter::SetFontProfile(const FFontProfile& NewFontProfile)
+void USessionAdapter::SetTypeScale(const FTypeScale& NewTypeScale)
 {
-    PlayerTheme.FontProfile = NewFontProfile;
-    OnThemeChanged.Broadcast(PlayerTheme);
+    ActiveTheme.Type = NewTypeScale;
+    OnThemeChanged.Broadcast(ActiveTheme);
 }
 
-void USessionAdapter::ResetThemeToDefaults()
+void USessionAdapter::SetSpaceGrid(const FSpaceGrid& NewSpaceGrid)
 {
-    InitializeDefaultTheme();
-    OnThemeChanged.Broadcast(PlayerTheme);
+    ActiveTheme.Space = NewSpaceGrid;
+    OnThemeChanged.Broadcast(ActiveTheme);
 }
 
-void USessionAdapter::InitializeDefaultTheme()
+void USessionAdapter::SetBorderSpec(const FBorderSpec& NewBorderSpec)
 {
-    // Default dark theme
-    PlayerTheme.ColorProfile.AccentColor = FLinearColor(0.1f, 0.6f, 1.0f, 1.0f);       // Blue accent
-    PlayerTheme.ColorProfile.BackgroundColor = FLinearColor(0.02f, 0.02f, 0.02f, 1.0f); // Near black
-    PlayerTheme.ColorProfile.SecondaryBackgroundColor = FLinearColor(0.08f, 0.08f, 0.08f, 1.0f);
-    PlayerTheme.ColorProfile.TextColor = FLinearColor(0.95f, 0.95f, 0.95f, 1.0f);       // Off-white
-    PlayerTheme.ColorProfile.SecondaryTextColor = FLinearColor(0.6f, 0.6f, 0.6f, 1.0f);
-    PlayerTheme.ColorProfile.HighlightColor = FLinearColor(1.0f, 0.5f, 0.0f, 1.0f);     // Orange
-    PlayerTheme.ColorProfile.AlertColor = FLinearColor(1.0f, 0.2f, 0.2f, 1.0f);         // Red
-    PlayerTheme.ColorProfile.DisabledColor = FLinearColor(0.3f, 0.3f, 0.3f, 0.5f);
-    PlayerTheme.ColorProfile.SuccessColor = FLinearColor(0.2f, 0.8f, 0.2f, 1.0f);       // Green
-    PlayerTheme.ColorProfile.InfoColor = FLinearColor(0.2f, 0.6f, 1.0f, 1.0f);          // Light blue
-
-    // Default font settings
-    PlayerTheme.FontProfile.PrimaryFont = nullptr;  // Will use engine default
-    PlayerTheme.FontProfile.SecondaryFont = nullptr;
-    PlayerTheme.FontProfile.PrimaryFontSize = 14;
-    PlayerTheme.FontProfile.SecondaryFontSize = 10;
-    PlayerTheme.FontProfile.bUseBoldForHeaders = true;
-    PlayerTheme.FontProfile.bUseItalicForEmphasis = false;
-    PlayerTheme.FontProfile.LineHeight = 1.2f;
-    PlayerTheme.FontProfile.LetterSpacing = 0.0f;
-    PlayerTheme.FontProfile.HeadingFontColor = FLinearColor::White;
-    PlayerTheme.FontProfile.BodyFontColor = FLinearColor(0.9f, 0.9f, 0.9f, 1.0f);
-    PlayerTheme.FontProfile.LinkFontColor = FLinearColor(0.1f, 0.6f, 1.0f, 1.0f);
+    ActiveTheme.Border = NewBorderSpec;
+    OnThemeChanged.Broadcast(ActiveTheme);
 }
 
-void USessionAdapter::ApplyDarkTheme()
+void USessionAdapter::SetMotionTiming(const FMotionTiming& NewMotionTiming)
 {
-    InitializeDefaultTheme(); // Default is already dark
-    OnThemeChanged.Broadcast(PlayerTheme);
+    ActiveTheme.Motion = NewMotionTiming;
+    OnThemeChanged.Broadcast(ActiveTheme);
 }
 
-void USessionAdapter::ApplyLightTheme()
+void USessionAdapter::ResetTheme()
 {
-    PlayerTheme.ColorProfile.AccentColor = FLinearColor(0.0f, 0.4f, 0.8f, 1.0f);        // Darker blue
-    PlayerTheme.ColorProfile.BackgroundColor = FLinearColor(0.95f, 0.95f, 0.95f, 1.0f); // Light grey
-    PlayerTheme.ColorProfile.SecondaryBackgroundColor = FLinearColor(0.88f, 0.88f, 0.88f, 1.0f);
-    PlayerTheme.ColorProfile.TextColor = FLinearColor(0.1f, 0.1f, 0.1f, 1.0f);          // Near black
-    PlayerTheme.ColorProfile.SecondaryTextColor = FLinearColor(0.4f, 0.4f, 0.4f, 1.0f);
-    PlayerTheme.ColorProfile.HighlightColor = FLinearColor(0.9f, 0.4f, 0.0f, 1.0f);     // Orange
-    PlayerTheme.ColorProfile.AlertColor = FLinearColor(0.8f, 0.1f, 0.1f, 1.0f);         // Red
-    PlayerTheme.ColorProfile.DisabledColor = FLinearColor(0.6f, 0.6f, 0.6f, 0.5f);
-    PlayerTheme.ColorProfile.SuccessColor = FLinearColor(0.1f, 0.6f, 0.1f, 1.0f);       // Green
-    PlayerTheme.ColorProfile.InfoColor = FLinearColor(0.0f, 0.4f, 0.8f, 1.0f);          // Blue
-
-    PlayerTheme.FontProfile.HeadingFontColor = FLinearColor(0.1f, 0.1f, 0.1f, 1.0f);
-    PlayerTheme.FontProfile.BodyFontColor = FLinearColor(0.2f, 0.2f, 0.2f, 1.0f);
-    PlayerTheme.FontProfile.LinkFontColor = FLinearColor(0.0f, 0.4f, 0.8f, 1.0f);
-
-    OnThemeChanged.Broadcast(PlayerTheme);
+    BootstrapDefaultTheme();
+    OnThemeChanged.Broadcast(ActiveTheme);
 }
 
-void USessionAdapter::ApplyHighContrastTheme()
+//------------------------------------------------------------------------------
+// theme initialization
+//------------------------------------------------------------------------------
+
+void USessionAdapter::BootstrapDefaultTheme()
 {
-    PlayerTheme.ColorProfile.AccentColor = FLinearColor(1.0f, 1.0f, 0.0f, 1.0f);        // Yellow
-    PlayerTheme.ColorProfile.BackgroundColor = FLinearColor(0.0f, 0.0f, 0.0f, 1.0f);    // Pure black
-    PlayerTheme.ColorProfile.SecondaryBackgroundColor = FLinearColor(0.1f, 0.1f, 0.1f, 1.0f);
-    PlayerTheme.ColorProfile.TextColor = FLinearColor(1.0f, 1.0f, 1.0f, 1.0f);          // Pure white
-    PlayerTheme.ColorProfile.SecondaryTextColor = FLinearColor(1.0f, 1.0f, 0.0f, 1.0f); // Yellow
-    PlayerTheme.ColorProfile.HighlightColor = FLinearColor(0.0f, 1.0f, 1.0f, 1.0f);     // Cyan
-    PlayerTheme.ColorProfile.AlertColor = FLinearColor(1.0f, 0.0f, 0.0f, 1.0f);         // Pure red
-    PlayerTheme.ColorProfile.DisabledColor = FLinearColor(0.5f, 0.5f, 0.5f, 1.0f);
-    PlayerTheme.ColorProfile.SuccessColor = FLinearColor(0.0f, 1.0f, 0.0f, 1.0f);       // Pure green
-    PlayerTheme.ColorProfile.InfoColor = FLinearColor(0.0f, 1.0f, 1.0f, 1.0f);          // Cyan
+    FPalette& P = ActiveTheme.Palette;
+    
+    P.SurfacePrime = FLinearColor(0.02f, 0.02f, 0.02f, 1.0f);
+    P.SurfaceShift = FLinearColor(0.08f, 0.08f, 0.08f, 1.0f);
+    P.SurfaceRaised = FLinearColor(0.12f, 0.12f, 0.12f, 1.0f);
+    P.SurfaceInset = FLinearColor(0.01f, 0.01f, 0.01f, 1.0f);
+    
+    P.TextPrime = FLinearColor(0.95f, 0.95f, 0.95f, 1.0f);
+    P.TextShift = FLinearColor(0.70f, 0.70f, 0.70f, 1.0f);
+    P.TextMute = FLinearColor(0.45f, 0.45f, 0.45f, 1.0f);
+    P.TextOnAccent = FLinearColor(0.05f, 0.05f, 0.05f, 1.0f);
+    
+    P.AccentCore = FLinearColor(0.10f, 0.60f, 1.00f, 1.0f);
+    P.AccentSharp = FLinearColor(0.20f, 0.70f, 1.00f, 1.0f);
+    P.AccentSoft = FLinearColor(0.05f, 0.50f, 0.90f, 1.0f);
+    
+    P.StateHover = FLinearColor(1.00f, 1.00f, 1.00f, 0.08f);
+    P.StateActive = FLinearColor(1.00f, 1.00f, 1.00f, 0.12f);
+    P.StateDisable = FLinearColor(0.30f, 0.30f, 0.30f, 0.50f);
+    
+    P.SemanticCrit = FLinearColor(1.00f, 0.20f, 0.20f, 1.0f);
+    P.SemanticWarn = FLinearColor(1.00f, 0.65f, 0.00f, 1.0f);
+    P.SemanticPass = FLinearColor(0.20f, 0.80f, 0.20f, 1.0f);
+    P.SemanticInfo = FLinearColor(0.20f, 0.60f, 1.00f, 1.0f);
+    
+    P.LinePrime = FLinearColor(0.20f, 0.20f, 0.20f, 1.0f);
+    P.LineShift = FLinearColor(0.15f, 0.15f, 0.15f, 1.0f);
+    P.LineFocus = FLinearColor(0.10f, 0.60f, 1.00f, 1.0f);
+}
 
-    PlayerTheme.FontProfile.PrimaryFontSize = 16;  // Larger for accessibility
-    PlayerTheme.FontProfile.SecondaryFontSize = 12;
-    PlayerTheme.FontProfile.HeadingFontColor = FLinearColor(1.0f, 1.0f, 0.0f, 1.0f);    // Yellow
-    PlayerTheme.FontProfile.BodyFontColor = FLinearColor::White;
-    PlayerTheme.FontProfile.LinkFontColor = FLinearColor(0.0f, 1.0f, 1.0f, 1.0f);       // Cyan
+//------------------------------------------------------------------------------
+// theme presets
+//------------------------------------------------------------------------------
 
-    OnThemeChanged.Broadcast(PlayerTheme);
+void USessionAdapter::LoadDarkTheme()
+{
+    BootstrapDefaultTheme();
+    OnThemeChanged.Broadcast(ActiveTheme);
+}
+
+void USessionAdapter::LoadLightTheme()
+{
+    FPalette& P = ActiveTheme.Palette;
+    
+    P.SurfacePrime = FLinearColor(0.95f, 0.95f, 0.95f, 1.0f);
+    P.SurfaceShift = FLinearColor(0.88f, 0.88f, 0.88f, 1.0f);
+    P.SurfaceRaised = FLinearColor(1.00f, 1.00f, 1.00f, 1.0f);
+    P.SurfaceInset = FLinearColor(0.92f, 0.92f, 0.92f, 1.0f);
+    
+    P.TextPrime = FLinearColor(0.10f, 0.10f, 0.10f, 1.0f);
+    P.TextShift = FLinearColor(0.35f, 0.35f, 0.35f, 1.0f);
+    P.TextMute = FLinearColor(0.55f, 0.55f, 0.55f, 1.0f);
+    P.TextOnAccent = FLinearColor(1.00f, 1.00f, 1.00f, 1.0f);
+    
+    P.AccentCore = FLinearColor(0.00f, 0.45f, 0.85f, 1.0f);
+    P.AccentSharp = FLinearColor(0.10f, 0.55f, 0.95f, 1.0f);
+    P.AccentSoft = FLinearColor(0.00f, 0.35f, 0.75f, 1.0f);
+    
+    P.StateHover = FLinearColor(0.00f, 0.00f, 0.00f, 0.05f);
+    P.StateActive = FLinearColor(0.00f, 0.00f, 0.00f, 0.10f);
+    P.StateDisable = FLinearColor(0.60f, 0.60f, 0.60f, 0.50f);
+    
+    P.SemanticCrit = FLinearColor(0.85f, 0.10f, 0.10f, 1.0f);
+    P.SemanticWarn = FLinearColor(0.90f, 0.55f, 0.00f, 1.0f);
+    P.SemanticPass = FLinearColor(0.10f, 0.70f, 0.10f, 1.0f);
+    P.SemanticInfo = FLinearColor(0.00f, 0.45f, 0.85f, 1.0f);
+    
+    P.LinePrime = FLinearColor(0.75f, 0.75f, 0.75f, 1.0f);
+    P.LineShift = FLinearColor(0.85f, 0.85f, 0.85f, 1.0f);
+    P.LineFocus = FLinearColor(0.00f, 0.45f, 0.85f, 1.0f);
+    
+    OnThemeChanged.Broadcast(ActiveTheme);
+}
+
+void USessionAdapter::LoadHighContrastTheme()
+{
+    FPalette& P = ActiveTheme.Palette;
+    
+    P.SurfacePrime = FLinearColor(0.00f, 0.00f, 0.00f, 1.0f);
+    P.SurfaceShift = FLinearColor(0.10f, 0.10f, 0.10f, 1.0f);
+    P.SurfaceRaised = FLinearColor(0.15f, 0.15f, 0.15f, 1.0f);
+    P.SurfaceInset = FLinearColor(0.00f, 0.00f, 0.00f, 1.0f);
+    
+    P.TextPrime = FLinearColor(1.00f, 1.00f, 1.00f, 1.0f);
+    P.TextShift = FLinearColor(1.00f, 1.00f, 0.00f, 1.0f);
+    P.TextMute = FLinearColor(0.85f, 0.85f, 0.85f, 1.0f);
+    P.TextOnAccent = FLinearColor(0.00f, 0.00f, 0.00f, 1.0f);
+    
+    P.AccentCore = FLinearColor(1.00f, 1.00f, 0.00f, 1.0f);
+    P.AccentSharp = FLinearColor(1.00f, 1.00f, 0.50f, 1.0f);
+    P.AccentSoft = FLinearColor(0.85f, 0.85f, 0.00f, 1.0f);
+    
+    P.StateHover = FLinearColor(1.00f, 1.00f, 1.00f, 0.15f);
+    P.StateActive = FLinearColor(1.00f, 1.00f, 1.00f, 0.25f);
+    P.StateDisable = FLinearColor(0.50f, 0.50f, 0.50f, 1.0f);
+    
+    P.SemanticCrit = FLinearColor(1.00f, 0.00f, 0.00f, 1.0f);
+    P.SemanticWarn = FLinearColor(1.00f, 1.00f, 0.00f, 1.0f);
+    P.SemanticPass = FLinearColor(0.00f, 1.00f, 0.00f, 1.0f);
+    P.SemanticInfo = FLinearColor(0.00f, 1.00f, 1.00f, 1.0f);
+    
+    P.LinePrime = FLinearColor(1.00f, 1.00f, 1.00f, 1.0f);
+    P.LineShift = FLinearColor(0.75f, 0.75f, 0.75f, 1.0f);
+    P.LineFocus = FLinearColor(1.00f, 1.00f, 0.00f, 1.0f);
+    
+    ActiveTheme.Type.BodyM.Size = 16;
+    ActiveTheme.Type.BodyL.Size = 18;
+    
+    OnThemeChanged.Broadcast(ActiveTheme);
+}
+
+//------------------------------------------------------------------------------
+// user preferences
+//------------------------------------------------------------------------------
+
+FUserPreferences USessionAdapter::GetUserPreferences() const
+{
+    if (PreferencesMgr) // Reason: Valid manager check
+    {
+        return PreferencesMgr->GetUserPreferences();
+    } // End if (PreferencesMgr check)
+    
+    return FUserPreferences();
+}
+
+void USessionAdapter::SetUserPreferences(const FUserPreferences& NewPreferences, bool bSaveImmediately)
+{
+    if (PreferencesMgr) // Reason: Valid manager check
+    {
+        PreferencesMgr->SetUserPreferences(NewPreferences);
+        
+        if (bSaveImmediately) // Reason: Immediate save requested
+        {
+            PreferencesMgr->SaveUserPreferences();
+        } // End if (Save check)
+        
+        UE_LOG(LogTemp, Log, TEXT("SessionAdapter: Preferences updated"));
+    } // End if (PreferencesMgr check)
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("SessionAdapter: PreferencesMgr is null"));
+    }
+}
+
+bool USessionAdapter::LoadPreferences()
+{
+    if (PreferencesMgr) // Reason: Valid manager check
+    {
+        return PreferencesMgr->LoadUserPreferences();
+    } // End if (PreferencesMgr check)
+    
+    return false;
+}
+
+bool USessionAdapter::SavePreferences()
+{
+    if (PreferencesMgr) // Reason: Valid manager check
+    {
+        return PreferencesMgr->SaveUserPreferences();
+    } // End if (PreferencesMgr check)
+    
+    return false;
 }

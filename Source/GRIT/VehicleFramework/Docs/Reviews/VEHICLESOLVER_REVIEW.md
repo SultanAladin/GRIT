@@ -1,26 +1,798 @@
 # VehicleSolver.cpp - Engineering Review
 
 **File:** `VehicleSolver.cpp`
-**Lines:** 5683
-**Review Date:** 2025-12-15
+**Lines:** 6403
+**Review Date:** 2026-01-08
 **Reviewer:** AI Engineering Analysis
-**Scope:** Complete physics solver implementation
+**Scope:** Accuracy + performance (mandatory units audit; slope behavior; aero/load transfer; clutch/solver stability; intake/turbo model)
 
 ---
 
 ## EXECUTIVE SUMMARY
 
+This review is strictly about:
+
+- **Accuracy** (dimensional consistency, physical correctness, frame correctness)
+- **Performance** (hot paths, algorithmic complexity, avoidable work)
+
+The file contains several strong subsystem implementations (notably the tire Newton solver), but **a few unit/meaning ambiguities materially undermine interpretability and validation**.
+
+### Ratings (accuracy + performance only)
+
 | Category | Rating | Notes |
 |----------|--------|-------|
-| **Physics Accuracy** | A | Research-backed, proper units throughout |
-| **Code Quality** | A- | Well-documented, minor structural issues |
-| **Performance** | B+ | Good caching, some optimization opportunities |
-| **Numerical Stability** | A- | Robust guards, one edge case concern |
-| **Maintainability** | B+ | Large file, could benefit from splitting |
+| **Units & Dimensional Consistency** | C | Demonstrable ambiguity/conflict around anti-roll bar stiffness usage and “weight vs normal load” in slope logic |
+| **Slope / gravity behavior** | B- | Good intent + stiction handling exists; needs proof via frame-consistent gravity decomposition + validation matrix |
+| **Aerodynamics correctness** | C+ | Magnitudes are SI-consistent; force direction/basis assumptions can be wrong on slopes/yaw |
+| **Load transfer realism** | B | Two-path structure is good; roll centers currently hard-coded despite configuration support |
+| **Numerical stability (tire Newton solver)** | A- | Robust; performance risk is Pacejka evaluation count and iteration budget |
+| **Powertrain coupling correctness** | B- | Smoothing is numerically motivated; needs explicit validation criteria vs ground truth |
+| **Turbo/intake physical correctness** | C | Turbo spool is plausible; intake/MAP dynamics are not engineering-grade |
 
-**Overall Assessment:** Production-ready AAA-quality vehicle simulation with solid engineering foundations.
+**Overall assessment:** Several subsystems are strong, but the solver is not yet “proveably correct” under the requested slope/aero/roll-center validation conditions.
 
 ---
+
+# 0) Units & Dimensional Consistency Audit (MANDATORY)
+
+## 0.1 Unit system used in the solver (observed)
+
+- **Length:** Unreal units `[cm]` for transforms; converted to `[m]` via `* 0.01f` in multiple subsystems.
+- **Force:** SI `[N]` in solver math; converted to Unreal force units via `* 100.0f` before applying to Chaos (`1 N = 100 kg·cm/s²`).
+- **Torque:** SI `[N·m]` in math; converted to Unreal torque units via `* 100.0f` when applied as `N·cm`.
+
+## 0.2 Aerodynamics dimensional chain (force + moment)
+
+**Ground truth:**
+
+```
+q = 0.5 * ρ * V^2        [Pa]
+F = q * A * C            [N]
+M = r × F                [N·m]
+```
+
+**Observed:** aerodynamic package structs store:
+
+- Areas in `[m²]`
+- Coefficients dimensionless `[-]`
+- Force application points relative to COM in `[m]` (computed from socket locations in `[cm]` then `*0.01f`)
+
+**Dimensional status:** consistent for magnitudes.
+
+## 0.3 Roll stiffness terms (springs vs ARB) 
+
+In `ComputeLoadTransferRealtime` (evidence):
+
+- `K_spring_front` is formed by summing wheel spring rates → `[N/m]`.
+- `K_phi_springs_front = K_spring_front * t^2 * 0.5` → `[N·m]` (often written `[N·m/rad]`, since `rad` is dimensionless).
+
+**Dimensional status:** correct.
+
+## 0.4 Anti-roll bar stiffness: explicit ambiguity/conflict
+
+Two different interpretations are simultaneously present in code paths:
+
+- **Interpretation A (force-based, consistent with ARB force implementation):**
+  - `Bar.Stiffness` is a *linear* stiffness relating left-right wheel displacement difference to a vertical force couple.
+  - Units: `[N/m]`.
+
+- **Interpretation B (roll-stiffness-based, assumed in load transfer distribution):**
+  - `Bar.Stiffness` is *already* an axle roll stiffness contribution.
+  - Units: `[N·m]` (commonly `[N·m/rad]`).
+
+The solver currently:
+
+- Uses `Bar.Stiffness` as `[N/m]` when computing ARB forces.
+- Adds `Bar.Stiffness` into `K_phi_ARB_front/rear` as if it were `[N·m]`.
+
+**Dimensional verdict:** the code contains a **hard, demonstrable unit/meaning conflict**.
+
+**Required resolution (documentation-level):** the project must choose one meaning and apply a conversion:
+
+- If the tuning value is `[N/m]`, then an equivalent axle roll stiffness is approximately:
+  - `K_phi_ARB ≈ k_arb * (t^2 / 2)`.
+- If the tuning value is `[N·m]`, then the equivalent force law needs a mapping from roll to wheel displacement:
+  - `F_left = +(K_phi_ARB / t) * φ`, `F_right = -(K_phi_ARB / t) * φ`, with `φ ≈ Δz / t`.
+
+## 0.5 “Weight” vs “normal load” in slope logic
+
+The solver frequently uses:
+
+- `Fz` as the *contact normal load* `[N]`.
+
+Any code that constructs “gravity” magnitudes from `Fz` is dimensionally fine but **physically ambiguous**, because:
+
+- `Fz` is not generally equal to `m_wheel * g` (especially on slopes and under dynamic load transfer).
+
+## 0.6 Turbo/intake pressure units: bar vs kPa vs Pa
+
+Telemetry records `ManifoldPressure_kPa`.
+
+Turbo specs use `BoostPressureCurve` labeled `[Bar]` and build a dimensionless pressure ratio via `1.0f + BoostPressure_bar`.
+
+**Dimensional status:** pressure ratio is dimensionless, but the mapping implicitly assumes “bar above 1 bar ambient”. This is **meaning-ambiguous** unless explicitly defined.
+
+### Accuracy/Performance/Risk
+
+- **Accuracy impact:** High
+- **Performance impact:** None
+- **Risk level:** High (unit ambiguity blocks calibration and invalidates validation results)
+
+---
+
+# 1) Gravity & Slope Decomposition (required test conditions)
+
+## 1.1 Ground truth (frame-consistent)
+
+Let:
+
+- `g_world = (0,0,-g)` with `g = 9.80 m/s²`
+- `n` = contact/ground unit normal
+- `ê_long`, `ê_lat` = vehicle body forward/right unit vectors
+
+Then:
+
+```
+g_parallel = g_world - (g_world · n) n
+g_long = g_parallel · ê_long
+g_lat  = g_parallel · ê_lat
+F_long,grav = m_total * g_long
+F_lat,grav  = m_total * g_lat
+```
+
+These are the components that must be resisted (if static is possible) or will cause drift (if kinetic).
+
+## 1.2 Required slope test matrix (steering = 0)
+
+Test angles:
+
+- `θ ∈ {2°, 5°, 10°, 15°, 20°, 30°}`
+
+Test orientations (vehicle yaw relative to fall line):
+
+- **S1:** side-slope (pure camber), `δ = 90°`
+- **S2:** yawed slightly uphill, `δ = 90° - 15°`
+- **S3:** yawed slightly downhill, `δ = 90° + 15°`
+- **S4:** aligned straight uphill/downhill, `δ = 0°` or `180°`
+
+Controls (repeat each case):
+
+- `Throttle = 0`, `Brake = 0`
+- `Throttle = small constant`, `Brake = 0`
+- `Throttle = 0`, `Brake = applied`
+
+## 1.3 Expected behavior + when lateral drift is correct
+
+- **S1:** `F_long,grav ≈ 0`, `|F_lat,grav| = m g sinθ`.
+  - Drift is correct if `|F_lat,grav| > μ_s * ΣFz`.
+- **S4:** `F_lat,grav ≈ 0`.
+  - Any persistent lateral acceleration/drift (with no steering and no aero cross-force) is a red flag.
+
+## 1.4 Telemetry and pass/fail criteria
+
+The solver already emits a per-wheel friction-state CSV via `WriteFrictionStateCsv()`.
+
+### Available signals (grounded in current code)
+
+The CSV header includes (per wheel):
+
+- `VehicleSpeed_ms`
+- `Vx_ms`, `Vy_ms`
+- `ContactSpeed_ms`
+- `WheelOmega_rads`
+- `BrakeTorque_Nm`, `ClutchTorque_Nm`, `DriveTorque_Nm`
+- `F_Slope_Long_N`, `F_Slope_Lat_N`
+- `F_TireFrictionLimit_N` (current breakaway threshold used by the state machine)
+- `F_MechHoldLimit_N` (brake-based holding capacity)
+- `Fx_Applied_N`, `Fy_Applied_N`
+- `WheelLoad_N`
+- `bTireCanHoldLong`, `bMechCanHoldLong`
+
+**Important:** `F_Slope_*` is computed from:
+
+- `F_gravity_world = (0,0,-WheelLoad_N)` and then projected onto the ground plane.
+
+Therefore, it is a “slope demand proxy” derived from per-wheel normal load, **not** a direct `m g` projection.
+
+Pass/fail checks (per case, quasi-static low speed):
+
+- **P1 (gravity decomposition correctness; absolute):** compare against `m_total g sinθ` projections in vehicle frame (Section 1.1).
+  - **Status with current telemetry:** **UNPROVEN** (requires either logging ground normal `n`/slope angle `θ` and vehicle yaw-to-fallline `δ`, or logging an independent gravity projection built from `m_total` rather than `WheelLoad_N`).
+
+- **P2 (no phantom drift):** in S4, `Vy_ms` must converge to ~0 (tolerance set by deadband) with `Steering=0`.
+  - **Status with current telemetry:** provable from `Vy_ms`.
+
+- **P3 (correct static/kinetic boundary; operational):** when the solver claims static hold is possible (via `bTireCanHoldLong` / `bMechCanHoldLong`) and `Vy_ms` is inside deadband, `Fy_Applied_N` must oppose `Vy_ms` and remain bounded by `F_TireFrictionLimit_N`.
+  - **Status with current telemetry:** provable from existing fields.
+
+- **P4 (no “slope-lateral injection” in static lock):** when the solver is in its lateral-static regime (indirectly inferable from `Vy_ms` deadband + `Fy_Applied_N` structure), `Fy_Applied_N` must not track `F_Slope_Lat_N` when `Vy_ms ≈ 0`.
+  - **Status with current telemetry:** provable.
+
+If any required signal is missing, comparisons that depend on it are **UNPROVEN**.
+
+### Accuracy/Performance/Risk
+
+- **Accuracy impact:** High
+- **Performance impact:** Low
+- **Risk level:** High (slope bugs masquerade as “tire model” issues)
+
+---
+
+# 2) Roll Transfer & Roll Centers (geometry-derived; required)
+
+## 2.1 Ground truth: why roll centers matter
+
+In the two-path load transfer decomposition used by `ComputeLoadTransferRealtime`:
+
+- **Geometric load transfer** depends on the suspension’s roll center height(s):
+  - `ΔFz_geom_axle = (m_axle * a_y * h_RC_axle) / t_axle`
+- **Elastic load transfer** depends on the CG-to-roll-center lever arm:
+  - `ΔFz_elastic_total = (m_sprung * a_y * (h_CG - h_RC_avg)) / t_avg`
+
+So `h_RC` is not a “tuning number” in this formulation; it is a *geometric property* that directly determines how much lateral load transfer bypasses springs/ARBs.
+
+## 2.2 What the current solver does (grounded in code)
+
+In `ComputeLoadTransferRealtime`, roll centers are currently hard-coded:
+
+- `h_RC_front_m = 0.05`
+- `h_RC_rear_m  = 0.10`
+
+Yet the codebase already contains a suspension architecture enum and RC parameters in `FChassisConfiguration`:
+
+- `ESuspensionType` (Telescopic / DoubleWishbone / MacPhersonStrut / MultiLink / SolidAxle / Manual)
+- `RollCenterHeightFront_m`, `RollCenterHeightRear_m`
+
+**Interpretation:** the project already has the data model needed to support a geometry-derived (or at least config-derived) roll center, but the active load transfer path does not currently consume it.
+
+## 2.3 Why hard-coded RC heights are invalid long-term
+
+Hard-coding `h_RC` causes systematic errors in:
+
+- **Elastic vs geometric split** (springs/ARB tuning will “compensate” for incorrect `h_RC`)
+- **Under/oversteer balance** as suspension geometry changes
+- **Ride height effects** (real roll center migrates with bump/rebound)
+
+This also makes ARB stiffness calibration ambiguous because ARB influence is mediated by `(h_CG - h_RC)`.
+
+## 2.4 Conceptual roll center computation from existing geometry (not implemented)
+
+This section defines a *conceptual* procedure to compute `h_RC_front/rear` from suspension hardpoints.
+
+### 2.4.1 Inputs required (per axle, per side)
+
+For any geometry-derived RC, you need hardpoints in the vehicle/suspension plane, typically (names are conceptual):
+
+- **Double wishbone:**
+  - Upper arm inner pivots (front/rear) and upper ball joint
+  - Lower arm inner pivots (front/rear) and lower ball joint
+
+- **MacPherson strut:**
+  - Strut top mount
+  - Lower ball joint
+  - Lower arm inner pivots
+
+- **Solid axle with Panhard/Watt’s:**
+  - Panhard/Watt’s link endpoints to define lateral locating mechanism
+
+### 2.4.2 Front-view instant center method (classic)
+
+For independent suspensions, compute the **instant center (IC)** per side in the *front view*:
+
+- Project relevant arms/links into the front view plane.
+- For double wishbone:
+  - Define line `L_upper` through (upper inner pivot midpoint → upper ball joint).
+  - Define line `L_lower` through (lower inner pivot midpoint → lower ball joint).
+  - The intersection `IC = L_upper ∩ L_lower` is the side’s instant center.
+
+Then:
+
+- Construct the **swing arm line** from the tire contact patch center through `IC`.
+- Repeat for left and right sides.
+- The **roll center** is the intersection of the left and right swing arm lines with the vehicle center plane.
+
+This yields `h_RC` as the Z coordinate (in `[m]`).
+
+### 2.4.3 Mapping to `ESuspensionType`
+
+The existing enum in `FChassisConfiguration` should be treated as the *authoritative selector*:
+
+- `Manual`: use `RollCenterHeight*_m` directly.
+- `Telescopic`: approximate RC at (effective) spring top mount height times `TelescopicCorrectionFactor`.
+- `DoubleWishbone` / `MacPhersonStrut`: compute IC and RC by the method above.
+- `MultiLink`: compute a *virtual* upper/lower arm (requires extra hardpoints or a precomputed kinematic model).
+- `SolidAxle`: RC depends on lateral locating device (Panhard/Watt’s); absent link data, axle center is a crude fallback.
+
+## 2.5 Explicit validation conditions + pass/fail criteria
+
+### V1: Lateral load transfer partitioning (flat ground)
+
+Test:
+
+- Flat ground
+- Constant speed, constant radius cornering
+- Measure `a_y` (body lateral acceleration) and wheel loads
+
+Ground truth prediction:
+
+- Compute `ΔFz_geom_front/rear` and `ΔFz_elastic_front/rear` from the equations in 2.1.
+
+Solver observables:
+
+- `Wheel_LoadTransfer_N[i]` (from telemetry)
+- `Wheel_Load_N[i]` vs static loads
+
+Pass/fail:
+
+- The axle-summed left-right deltas must match the predicted `ΔFz_lat_axle` within 10% at steady state.
+
+### V2: Roll center sensitivity sanity
+
+Test:
+
+- Repeat V1 with `h_RC_front_m` increased/decreased by a known amount (configuration-only test).
+
+Expected qualitative behavior:
+
+- Increasing `h_RC_front` must increase the fraction of geometric load transfer on the front axle and reduce elastic share.
+
+Pass/fail:
+
+- `ΔFz_geom_front` must be monotonic in `h_RC_front` for fixed `a_y`.
+
+### Accuracy/Performance/Risk
+
+- **Accuracy impact:** High (RC is a first-order parameter in load transfer split)
+- **Performance impact:** Medium (geometry-derived RC requires per-frame or per-state computation; caching/approximation likely required)
+- **Risk level:** Medium (implementation complexity; but documentation/validation is low-risk)
+
+---
+
+# 3) Air Intake / Turbo / Manifold Model (design-grade critique + replacement proposal)
+
+## 3.1 Ground truth: what must be modeled
+
+For a turbocharged spark-ignition engine, “boost” felt by the engine is governed by **intake manifold state**, not directly by turbo shaft RPM.
+
+Minimum physical state:
+
+- Manifold absolute pressure: `P_man [Pa]`
+- Manifold temperature: `T_man [K]` (or assumed constant as a first-order simplification)
+- Manifold volume: `V_man [m³]`
+
+Key constraints:
+
+- **Mass conservation:** `dm_man/dt = m_dot_in - m_dot_out`
+- **Ideal gas closure:** `m_man = (P_man * V_man) / (R * T_man)`
+- **Compressor power balance** and **turbine power balance** drive shaft dynamics.
+
+Authoritative references for this class of lumped models:
+
+- Heywood, *Internal Combustion Engine Fundamentals* (gas dynamics + engine flow)
+- Watson & Janota, *Turbocharging the Internal Combustion Engine*
+- Standard 1D compressible orifice flow relations (choked/unchoked)
+
+## 3.2 What the current solver does (grounded in code)
+
+The current turbo implementation in `SolvePowertrain` contains:
+
+- A turbine/compressor power balance with plausible isentropic work equations.
+- A shaft acceleration step using `TurboInertia`.
+
+However, the intake air path is not represented as a mass balance system.
+
+Evidence in code:
+
+- “Flow” is computed from an exhaust flow curve scaled by throttle:
+  - `MaxFlowRate = Engine.SampleFlowRate(EngineRPM)`
+  - `CurrentFlowRate = MaxFlowRate * EffectiveThrottle`
+- “Target boost” is computed as a function of turbo RPM through a preset curve:
+  - `TargetBoostPressure_bar = Turbocharger.EvalBoostPressure(TurboShaftRPM)`
+  - `CompressorPressureRatio = 1.0 + TargetBoostPressure_bar`
+- “Boost dynamics” are a first-order filter of that target:
+  - `CurrentBoostPressure = FInterpTo(CurrentBoostPressure, PotentialBoost, ...)`
+
+**Critical observation:** there is no explicit `P_man` state integration, and there is no `m_dot_out` term tied to cylinder filling.
+
+## 3.3 Design-grade issues (accuracy)
+
+### I1: Boost is not coupled to engine air demand
+
+In reality, for fixed turbo speed and wastegate, `P_man` depends strongly on:
+
+- Throttle plate restriction
+- Engine volumetric efficiency `VE(RPM,MAP)`
+- Manifold volume and temperature
+
+The current model uses throttle mainly as a multiplier on “flow” and exhaust temp, but does not compute the resulting manifold pressure from a mass balance.
+
+### I2: Pressure units and meaning are ambiguous
+
+`EvalBoostPressure()` returns `[bar]`, and the solver uses:
+
+- `PressureRatio = 1 + Boost_bar`
+
+This assumes “bar above ambient” with ambient fixed at 1 bar.
+
+If `Boost_bar` is interpreted as absolute bar, this is incorrect. If it is gauge bar, it is still missing `P_ambient` variability (altitude).
+
+### I3: Wastegate/BOV are not physically coupled into turbine/compressor flow
+
+- Wastegate position is computed from boost overshoot but does not feed back into turbine expansion ratio or turbine mass flow.
+- BOV affects a filtered boost value, but it does not vent mass from a modeled plenum.
+
+### I4: Compressor map is not used as a compressor map
+
+`TurbochargerSpecifications` includes a `CompressorMap`, but the current turbo stage does not solve for operating point `(m_dot, π_c)` on that map.
+
+## 3.4 Replacement proposal: lumped manifold (MAP) + throttle + VE model
+
+This is a conceptual model intended to replace “boost as filtered curve output” with a **conservation-law system**.
+
+### 3.4.1 State variables
+
+- `P_man [Pa]`
+- optionally `T_man [K]` (or assume constant ~ ambient initially)
+
+### 3.4.2 Manifold mass balance
+
+Use ideal gas and mass conservation:
+
+```
+m_man = (P_man * V_man) / (R * T_man)
+dm_man/dt = m_dot_in - m_dot_out
+dP_man/dt = (R * T_man / V_man) * (m_dot_in - m_dot_out)
+```
+
+### 3.4.3 Engine air demand (outflow)
+
+For a 4‑stroke engine:
+
+```
+m_dot_out = VE(RPM, P_man) * (P_man * V_disp / (R * T_man)) * (RPM / 120)
+```
+
+Where:
+
+- `V_disp [m³]` engine displacement
+- `RPM/120` is intake events per second for a 4-stroke (`RPM/60` rev/s, `/2` intake per 2 rev)
+- `VE` is a calibrated map or curve (at minimum a 2D table `VE(RPM,MAP)`)
+
+### 3.4.4 Throttle / compressor inflow
+
+Model inflow through an effective restriction using compressible orifice flow.
+
+Inputs:
+
+- Upstream pressure `P_up` (compressor outlet or ambient)
+- Downstream `P_man`
+- Effective area `A_throttle = A_max * f(throttle)`
+
+Then use choked/unchoked mass flow relations (or a simplified quadratic if compressible flow is too expensive).
+
+### 3.4.5 Turbo coupling (minimal viable)
+
+Maintain the existing shaft energy balance concept, but couple it to manifold physics:
+
+- `m_dot_in` comes from compressor map / throttle relation, not from exhaust flow curves.
+- Compressor pressure ratio becomes an outcome of `(ω_turbo, m_dot_in)` on a map.
+- Wastegate reduces effective turbine mass flow and/or expansion ratio.
+
+## 3.5 Explicit validation conditions + pass/fail criteria
+
+This section defines measurable acceptance criteria comparing:
+
+- **Ground truth expectation** (first principles)
+- **Current implementation output**
+- **Proposed model output**
+
+### V1: Manifold pressure steady state (step throttle)
+
+Test:
+
+- Fixed RPM (hold via dyno mode / clutch lock)
+- Step throttle 0 → 100% and 100% → 0
+
+Ground truth expectation:
+
+- `P_man` rises with a time constant proportional to `V_man` and net `(m_dot_in - m_dot_out)`.
+
+Pass/fail (proposed model):
+
+- `P_man` must asymptotically converge (no oscillation) and remain ≥ ambient.
+- Time to reach 63% of final value must be monotonic in `V_man`.
+
+Status with current model:
+
+- **UNPROVEN** because there is no explicit `P_man` state, only `CurrentBoostPressure`.
+
+### V2: Wastegate authority
+
+Test:
+
+- Command a max-boost target and then reduce it (or trigger overboost)
+
+Pass/fail:
+
+- Increasing wastegate position must reduce turbine power and prevent `P_man` overshoot.
+
+Status with current model:
+
+- **UNPROVEN** because wastegate does not couple into turbine power calculation.
+
+### V3: Pumping loss / engine load coupling via MAP
+
+Test:
+
+- Fixed vehicle speed, vary throttle and observe engine braking/pumping behavior
+
+Ground truth expectation:
+
+- At low throttle, manifold pressure falls, pumping torque increases.
+
+Pass/fail:
+
+- Pumping torque term (or an equivalent) must be monotonic with decreasing `P_man` at fixed RPM.
+
+Status with current model:
+
+- Current pumping blend uses `1 - throttle` rather than `P_man`, so MAP-driven pumping is **not modeled**.
+
+### Accuracy/Performance/Risk
+
+- **Accuracy impact:** High (MAP is the correct coupling variable between engine air, turbo, and pumping)
+- **Performance impact:** Medium (adds a few scalar states and flow computations; needs careful map evaluation/caching)
+- **Risk level:** Medium (more parameters; but validation criteria are straightforward)
+
+---
+
+# 4) Aerodynamics (frame correctness + slopes)
+
+## 4.1 Ground truth
+
+At minimum, aero needs consistent answers to:
+
+- **Drag:** always opposes air-relative velocity.
+- **Lift/downforce:** acts in a well-defined direction (usually body `-Z` for a vehicle-fixed aero package).
+- **Side force:** should be near zero at zero sideslip/crosswind.
+
+On a slope/bank, **world up** is not equal to **body up**, so applying downforce along world `-Z` injects errors in normal-force and tangential components.
+
+## 4.2 What the current solver does (grounded in code)
+
+In `ComputeAerodynamicForces()`:
+
+- Body aero decomposes velocity by reading **world components**:
+  - `Vx = Vel_World.X`, `Vy = Vel_World.Y`, `Vz = Vel_World.Z`
+  - This implicitly assumes world axes are body axes.
+
+- Drag vector is applied as:
+  - `DragForceWorld = -VelocityDir_World * TotalDrag_N`
+  - This is directionally correct (drag opposes airflow).
+
+- Downforce vector is applied as:
+  - `LiftForceWorld = (0,0,-TotalDownforce_N)`
+  - This assumes “down” is world `-Z`.
+
+- Side force direction is computed using world up:
+  - `RightVector = cross((0,0,1), VelocityDir_World)`
+
+## 4.3 Failure modes (when you will see wrong behavior)
+
+- **Bank/slope normal-force error:** downforce is applied world-vertical instead of body-vertical, changing the portion of downforce that actually increases `Fz` on a bank.
+- **Bank/slope lateral injection:** because the road normal is tilted, a world-vertical force has a tangential component in the contact plane; this can present as “mysterious” lateral drift/load transfer.
+- **Incorrect yaw/crosswind handling:** using `Vel_World.X/Y/Z` to represent longitudinal/lateral/vertical velocity is wrong once the vehicle rotates away from world axes.
+
+## 4.4 Proposed conceptual fix (no code here)
+
+Compute aero in the **vehicle body frame**, then transform to world:
+
+- Obtain `V_world` and `HullXfm`.
+- Compute `V_body = HullXfm.InverseTransformVectorNoScale(V_world)`.
+- Compute body-axis forces:
+  - `F_drag_body` along `-sign(V_body.X)` etc (or simply `-V_body.GetSafeNormal() * D` for drag).
+  - `F_down_body = (0,0,-Downforce)` (body-down).
+  - `F_side_body` from sideslip/crosswind (body Y).
+- Transform: `F_world = HullXfm.TransformVectorNoScale(F_body)`.
+
+Ground-effect terms that depend on ride height should reference ride height along the contact normal (or a filtered chassis up/ground normal) rather than world `Z`.
+
+## 4.5 Explicit validation conditions + pass/fail criteria
+
+### A1: No sideslip, flat ground
+
+Test:
+
+- Flat ground, no wind
+- Vehicle aligned with direction of motion (no yaw slip)
+
+Pass/fail:
+
+- Side force must be near zero. Suggested threshold: `|F_side| < 0.01 * F_drag + 25 N`.
+- **Status:** likely **UNPROVEN** unless side force is logged.
+
+### A2: Banked road, no sideslip
+
+Test:
+
+- Bank angle `θ`, constant speed
+- No steering input and no yaw slip
+
+Pass/fail:
+
+- Downforce should remain mostly normal to the body (vehicle-fixed aero), and the portion contributing to `Fz` should scale with `cos(θ)`.
+- Any *new* lateral drift introduced purely by downforce is a fail.
+- **Status:** partly provable via wheel loads vs speed if downforce distribution is logged.
+
+### Accuracy/Performance/Risk
+
+- **Accuracy impact:** High
+- **Performance impact:** Low (mostly vector transforms)
+- **Risk level:** Medium (touches many “feel” aspects; must validate)
+
+---
+
+# 5) Anti‑Roll Bar (ARB) stiffness interpretation (explicit verification)
+
+## 5.1 What is currently true in the codebase
+
+- `FAntiRollbar.Stiffness` is documented as `[N/m]`.
+- `ComputeAntiRollbarForces()` uses it as `[N/m]` to generate a force couple.
+- `ComputeLoadTransferRealtime()` currently adds `Bar.Stiffness` into `K_phi_ARB_*` as if it were `[N·m]`.
+
+This must be resolved as a single consistent interpretation.
+
+## 5.2 How to verify the intended meaning with a measurement
+
+The solver already stores `LastAntiRollTorque` (in `N·cm`). Use it as the truth signal.
+
+### If `Stiffness` is `[N/m]`
+
+Apply a known left-right suspension displacement difference `Δz` (in meters).
+
+- Predicted vertical force magnitude: `F = k_arb * Δz`.
+- Predicted roll torque magnitude about the body longitudinal axis:
+  - `τ ≈ F * t` where `t` is track width.
+
+Example:
+
+- `k_arb = 60000 N/m`, `Δz = 0.01 m`, `t = 1.6 m` → `τ ≈ 960 N·m`.
+
+Check:
+
+- `|LastAntiRollTorque| / 100` should be near `τ` when only ARB produces the couple.
+
+### If `Stiffness` is `[N·m]` (roll stiffness)
+
+Define roll angle proxy `φ ≈ Δz / t`.
+
+- `τ = K_phi_ARB * φ`.
+- Equivalent linear stiffness would be `k_arb ≈ K_phi_ARB / t^2`.
+
+## 5.3 Pass/fail criteria
+
+- **ARB force-torque consistency:** measured `τ` must match predicted `τ` within 10% across multiple `Δz` values.
+- **Load transfer consistency:** the ARB contribution used for elastic load transfer split must be the *same* physical quantity (either convert `k_arb→K_phi` or vice versa).
+
+### Accuracy/Performance/Risk
+
+- **Accuracy impact:** High
+- **Performance impact:** None
+- **Risk level:** High (misinterpreting ARB units poisons handling balance tuning)
+
+---
+
+# 6) Clutch / Powertrain Coupling (engine feedback + slope load)
+
+## 6.1 Ground truth
+
+- Clutch transmits torque up to a capacity `T_max` and slips when exceeded.
+- Slope/drag/rolling resistance should reflect to the engine as a load torque through drivetrain ratio and efficiency.
+
+## 6.2 What the current solver does (grounded in code)
+
+- Clutch engagement is smoothed (`FInterpTo`) and torque is modeled as a bounded slip-proportional element.
+- Engine load reflection computes resistive power from:
+  - aero drag + rolling resistance + grade resistance
+  - then reflects it as `T_load = P_resist / (ω_engine * η)` (with smoothing).
+
+## 6.3 Validation conditions + pass/fail criteria
+
+### PWR1: Constant speed on flat ground
+
+Test:
+
+- Hold steady speed in gear (no acceleration)
+
+Pass/fail:
+
+- `EngineLoadTorque * ω_engine * η` should match `F_resist * V` within 5–10%.
+
+### PWR2: Coast down on a known grade
+
+Test:
+
+- Throttle=0, brake=0, steering=0
+- Multiple slope angles
+
+Pass/fail:
+
+- Measured longitudinal decel should match `g sinθ - (F_drag + F_rr)/m` within 10% at moderate speeds.
+
+### PWR3: Clutch lock/unlock transition sanity
+
+Pass/fail:
+
+- Lockup should not create sign-flip impulses in driveline torque.
+- SlipRPM should decay monotonically under increasing engagement for fixed wheel speed.
+
+### Accuracy/Performance/Risk
+
+- **Accuracy impact:** Medium
+- **Performance impact:** Low
+- **Risk level:** Medium
+
+---
+
+# 7) Tire Slip Newton Solver Damping / Stability / Performance
+
+## 7.1 What “damping” is doing here (grounded in code)
+
+The Newton iteration applies a trust-region style clamp:
+
+- `Kappa += clamp(ΔK, -0.15, 0.15)`
+- `Alpha += clamp(ΔA, -0.05, 0.05)`
+
+This is not physical damping; it is a numerical stability device that:
+
+- prevents overshoot near peak-force Jacobian singularities
+- limits sensitivity to finite-difference noise
+
+## 7.2 Performance reality
+
+Per wheel, per iteration, the solver evaluates combined Pacejka forces multiple times.
+
+The code itself estimates:
+
+- ~12 iterations × ~2 Pacejka calls ≈ 24 MF evaluations per wheel.
+
+## 7.3 Validation criteria
+
+- **NS1 (convergence):** residuals `Res_K`, `Res_A` should converge below tolerance within `MaxIterations` under nominal driving.
+- **NS2 (robustness):** no oscillation in `Kappa` sign under steady throttle; no exploding slip under low speeds.
+
+### Accuracy/Performance/Risk
+
+- **Accuracy impact:** High (transient correctness)
+- **Performance impact:** Medium (Pacejka call count is dominant)
+- **Risk level:** Low (numerically conservative design)
+
+---
+
+# 8) System-Level Validation Matrix (ground truth vs current vs proposed)
+
+The purpose of this matrix is to prevent “feels wrong” debugging. Each subsystem must have a measurable pass/fail.
+
+| Subsystem | Ground truth | Observable / log | Pass/fail | Current status |
+|----------|--------------|------------------|-----------|----------------|
+| Slope decomposition | `F_parallel = m g sinθ` projected into vehicle axes | `F_Slope_Long_N`, `F_Slope_Lat_N` | match within 10% | **UNPROVEN** (current `F_Slope_*` derives from `WheelLoad_N`) |
+| Static drift on aligned incline | `Fy` should not accelerate vehicle when `Vy≈0` | `Vy_ms`, `Fy_Applied_N`, `F_Slope_Lat_N` | `Fy_Applied_N` does not track `F_Slope_Lat_N` when `Vy≈0` | provable |
+| ARB units | `τ = k Δz t` or `τ = Kφ φ` consistently | `LastAntiRollTorque` | within 10% across `Δz` | currently ambiguous |
+| Aero on slopes | downforce direction is body-fixed, not world-fixed | wheel loads vs speed | monotonic `Fz` vs `V^2` without lateral injection | partly provable |
+| Engine load reflection | `P = F_resist V`, `T = P/(ω η)` | telemetry torque/power + speed | within 5–10% at steady speed | provable |
+| Turbo/MAP dynamics | manifold mass balance | MAP telemetry | step response time constant behaves with `V_man` | **UNPROVEN** (no explicit MAP state) |
+
+### Accuracy/Performance/Risk
+
+- **Accuracy impact:** High
+- **Performance impact:** Low
+- **Risk level:** Low (documentation/test definition)
+
+---
+
+# Appendix A) Legacy pass-by-pass notes (superseded)
+
+This appendix is retained for historical detail, but it predates Sections 0–8 and contains assumptions that may be incorrect under the units audit (especially ARB units). Treat it as **non-authoritative**.
 
 ## PASS 1: LOAD TRANSFER SYSTEM
 

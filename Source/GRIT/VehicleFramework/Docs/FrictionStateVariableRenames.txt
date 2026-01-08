@@ -1,0 +1,40 @@
+================================================================================
+                    FRICTION STATE MACHINE VARIABLE RENAMES
+                           Karnopp Model Implementation
+================================================================================
+
+OLD NAME                        NEW NAME
+--------------------------------------------------------------------------------
+bVelocityInDeadband             Vy_DeadbandEntry
+bSlowEnoughLong                 Vx_DeadbandEntry
+bForceWithinLimit               Fy_Counteracted
+bForceWithinLimit_Long          Fx_Counteracted
+bCanEnterStatic_Lat             Fy_StaticEntry
+bCanEnterStatic_Long            Fx_StaticEntry
+bLateralBreakaway               Fy_Breakaway
+bLongBreakaway                  Fx_Breakaway
+bStaticHold_Lat                 Fy_StaticLock
+bStaticHold_Long                Fx_StaticLock
+bStaticHold                     StaticLock
+bBrakeHold                      BrakeStaticLock
+bBrakeCanHold                   BrakeCapacitySufficient
+bBrakesApplied                  BrakeActive
+
+================================================================================
+                              NAMING CONVENTION
+================================================================================
+
+Prefix indicates axis/quantity:
+  Fx_  = Longitudinal force
+  Fy_  = Lateral force
+  Vx_  = Longitudinal velocity
+  Vy_  = Lateral velocity
+
+Suffix indicates condition:
+  _DeadbandEntry    = Velocity within Karnopp dead-band (re-entry condition)
+  _Counteracted     = Force can be counteracted by static friction
+  _StaticEntry      = Combined condition for static regime entry
+  _Breakaway        = Force exceeds static friction limit
+  _StaticLock       = Currently in static friction regime
+
+================================================================================

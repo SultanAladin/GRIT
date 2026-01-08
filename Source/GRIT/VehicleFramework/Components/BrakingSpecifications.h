@@ -72,7 +72,7 @@ struct FBrakingSpecifications
     float MaxBrakePressure = 12.0e6f;                    // [Pa] - 120 bar
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Braking|Hydraulic")
-    float MaxHandbrakePressure = 0.0f;                   // [Pa]
+    float MaxHandbrakePressure = 9.5e6f;                // [Pa] - 95 bar (GT-R NISMO spec)
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Braking|Hydraulic")
     float PressureRiseRate = 50.0e6f;                    // [Pa·s⁻¹]

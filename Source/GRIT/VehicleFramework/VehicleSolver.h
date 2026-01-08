@@ -624,10 +624,170 @@ struct FVehicleSolverInput : public Chaos::FSimCallbackInput
     } // End Reset()
 }; // End FVehicleSolverInput
 
+/*====================================================================================================================================================
+                                                         PHYSICS THREAD → GAME THREAD OUTPUT                                                              
+PURPOSE: Pass computed physics state from PT to GT for visuals, audio, UI, and replication    
+USAGE: Populated in OnPreSimulate_Internal(), consumed in Tick()
+====================================================================================================================================================*/
+
 /* Physics callback output data - returned from physics thread to game thread */
 struct FVehicleSolverOutput : public Chaos::FSimCallbackOutput
 {
-    void Reset() {}
+    //--------------------------------------------------------------------------
+    //                          VEHICLE KINEMATICS
+    //--------------------------------------------------------------------------
+    float Speed_ms;                          // [m⋅s⁻¹] - Speed magnitude
+    float Speed_kmh;                         // [km/h] - Speed in km/h
+    float ForwardSpeed_ms;                   // [m⋅s⁻¹] - Longitudinal velocity
+    float LateralSpeed_ms;                   // [m⋅s⁻¹] - Lateral velocity
+    float LongitudinalAccel_G;               // [g] - Forward acceleration
+    float LateralAccel_G;                    // [g] - Lateral acceleration
+    
+    //--------------------------------------------------------------------------
+    //                          ENGINE STATE
+    //--------------------------------------------------------------------------
+    float EngineRPM;                         // [RPM] - Current engine speed
+    float EngineTorque_Nm;                   // [N⋅m] - Output torque
+    float EngineLoad_Nm;                     // [N⋅m] - Resistance load
+    float EnginePower_kW;                    // [kW] - Power output
+    float CoolantTemp_K;                     // [K] - Coolant temperature
+    float OilTemp_K;                         // [K] - Oil temperature
+    bool bEngineRunning;                     // [-] - Engine active
+    
+    //--------------------------------------------------------------------------
+    //                          TURBOCHARGER STATE
+    //--------------------------------------------------------------------------
+    float TurboShaftRPM;                     // [RPM] - Turbo speed
+    float BoostPressure_bar;                 // [bar] - Boost pressure
+    float WastegatePosition;                 // [0-1] - Wastegate opening
+    float BovPosition;                       // [0-1] - BOV opening
+    
+    //--------------------------------------------------------------------------
+    //                          TRANSMISSION STATE
+    //--------------------------------------------------------------------------
+    int32 CurrentGear;                       // [-] - Active gear (0=R2, 1=R1, 2=N, 3+=forward)
+    int32 TargetGear;                        // [-] - Requested gear
+    bool bIsShifting;                        // [-] - Shift in progress
+    float CombinedGearRatio;                 // [-] - Total gear ratio
+    
+    //--------------------------------------------------------------------------
+    //                          CLUTCH STATE
+    //--------------------------------------------------------------------------
+    float ClutchEngagement;                  // [0-1] - Clutch pressure
+    float ClutchTorque_Nm;                   // [N⋅m] - Transmitted torque
+    float ClutchSlipRPM;                     // [RPM] - Engine-trans speed delta
+    float ClutchLockup;                      // [0-1] - Lockup ratio
+    
+    //--------------------------------------------------------------------------
+    //                          WHEEL STATE (4 wheels: FL, FR, RL, RR)
+    //--------------------------------------------------------------------------
+    float WheelAngularVelocities[4];         // [rad⋅s⁻¹] - Wheel spin rates
+    float WheelRotationAngles[4];            // [rad] - Visual rotation (0-2π)
+    float WheelSteerAngles[4];               // [rad] - Steering angles
+    float WheelLoads[4];                     // [N] - Normal load per wheel
+    bool bWheelsInContact[4];                // [-] - Ground contact flags
+    bool bWheelsLocked[4];                   // [-] - Static friction locks
+    
+    //--------------------------------------------------------------------------
+    //                          TIRE SLIP STATE
+    //--------------------------------------------------------------------------
+    float WheelSlipRatios[4];                // [-] - Longitudinal slip (κ)
+    float WheelSlipAngles[4];                // [rad] - Lateral slip (α)
+    float WheelLongitudinalForces[4];        // [N] - Fx forces
+    float WheelLateralForces[4];             // [N] - Fy forces
+    float WheelSlipEnergy[4];                // [W] - Slip power dissipation
+    
+    //--------------------------------------------------------------------------
+    //                          SUSPENSION STATE
+    //--------------------------------------------------------------------------
+    float SuspensionDisplacements[4];        // [cm] - Compression/extension
+    float SuspensionVelocities[4];           // [cm⋅s⁻¹] - Damper velocity
+    float SuspensionForces[4];               // [N] - Spring+damper force
+    FVector ContactNormals[4];               // [-] - Ground normals
+    FVector ContactLocations[4];             // [cm] - Contact patch positions
+    
+    //--------------------------------------------------------------------------
+    //                          BRAKING STATE
+    //--------------------------------------------------------------------------
+    float BrakeTorques[4];                   // [N⋅m] - Brake torque per wheel
+    float BrakeTemperatures[4];              // [K] - Brake disk temperatures
+    float BrakePressures[4];                 // [Pa] - Hydraulic pressure
+    float BrakeFrictionCoeffs[4];            // [-] - Temp-adjusted friction
+    
+    //--------------------------------------------------------------------------
+    //                          AERODYNAMICS STATE
+    //--------------------------------------------------------------------------
+    float TotalDrag_N;                       // [N] - Total drag force
+    float TotalDownforce_N;                  // [N] - Total downforce
+    float FrontDownforce_N;                  // [N] - Front axle downforce
+    float RearDownforce_N;                   // [N] - Rear axle downforce
+    float MinRideHeight_cm;                  // [cm] - Minimum ground clearance
+    float AeroEfficiency;                    // [-] - L/D ratio
+    
+    //--------------------------------------------------------------------------
+    //                          DIFFERENTIAL STATE
+    //--------------------------------------------------------------------------
+    float FrontDiffLockPercent;              // [%] - Front diff lock
+    float RearDiffLockPercent;               // [%] - Rear diff lock
+    float CenterDiffLockPercent;             // [%] - Center diff lock
+    
+    //--------------------------------------------------------------------------
+    //                          FUEL & FLUIDS
+    //--------------------------------------------------------------------------
+    float FuelLevel_kg;                      // [kg] - Fuel mass remaining
+    float FuelLevelPercent;                  // [%] - Fuel percentage
+    float FuelFlowRate_kgh;                  // [kg⋅h⁻¹] - Consumption rate
+    
+    //--------------------------------------------------------------------------
+    //                          STABILITY SYSTEMS
+    //--------------------------------------------------------------------------
+    bool bABSActive;                         // [-] - ABS engaged
+    bool bTCSActive;                         // [-] - Traction control engaged
+    bool bESCActive;                         // [-] - Stability control engaged
+    float StabilityIntervention;             // [0-1] - ESC authority
+    
+    //--------------------------------------------------------------------------
+    //                          AUDIO CUES
+    //--------------------------------------------------------------------------
+    float EnginePitch;                       // [0-1] - Normalized RPM for audio
+    float TireSquealIntensity[4];            // [0-1] - Slip-based squeal volume
+    float BrakeSquealIntensity[4];           // [0-1] - Temp-based squeal volume
+    float TurboSpoolIntensity;               // [0-1] - Normalized turbo speed
+    bool bBackfireEvent;                     // [-] - Exhaust backfire trigger
+    bool bBovVentEvent;                      // [-] - BOV release trigger
+    
+    //--------------------------------------------------------------------------
+    //                          DEBUG / TELEMETRY
+    //--------------------------------------------------------------------------
+    float SimulationTime_s;                  // [s] - PT simulation time
+    float PhysicsDeltaTime_s;                // [s] - Physics timestep
+    int32 FrameNumber;                       // [-] - Physics frame counter
+    
+    //--------------------------------------------------------------------------
+    //                          METHODS
+    //--------------------------------------------------------------------------
+    
+    /** Reset all fields to default values */
+    void Reset()
+    {
+        FMemory::Memzero(this, sizeof(FVehicleSolverOutput));
+        
+        // Initialize non-zero defaults
+        CurrentGear = 2;                     // Neutral
+        TargetGear = 2;
+        bEngineRunning = false;
+        CombinedGearRatio = 0.0f;
+        ClutchLockup = 0.0f;
+        
+        for (int32 i = 0; i < 4; ++i)
+        {
+            ContactNormals[i] = FVector::UpVector;
+            BrakeFrictionCoeffs[i] = 0.4f;   // Baseline friction
+        }
+    } // End Reset()
+    
+    /** Default constructor - zero-initialize */
+    FVehicleSolverOutput() { Reset(); }
 }; // End FVehicleSolverOutput
 
 //------------------------------------------------------------------------------
@@ -755,6 +915,9 @@ public:
     /** Physics thread aerodynamics package */
     FAerodynamicPackage_PT AeroPackage_PT;               // [-] - Aerodynamics configuration (PT)
 
+    /** Aerodynamic braking activation threshold [0..1] */
+    float AeroBrakeThreshold_PT = 0.65f;                 // [-] - Brake input threshold for aero activation
+
     /** Physics thread aerodynamic forces (computed each frame) */
     FAerodynamicForces_PT AeroForces_PT;                 // [-] - Current frame aero forces (PT)
 
@@ -851,14 +1014,17 @@ private:
      * @param YawRate_rads Yaw rate in rad/s for side force calculation (optional, default 0)
      * @return FAerodynamicForces_PT struct with all computed forces
      */
+    /** Compute aerodynamic forces using validated academic formulations */
     FAerodynamicForces_PT ComputeAerodynamicForces(
         const FAerodynamicPackage_PT& Aero,
         float VehicleSpeed_ms,
         float RideHeight_m,
         const FVector& VelocityDir_World,
         float BrakeInput,
+        float HandbrakeInput,
         float ThrottleInput,
-        float YawRate_rads = 0.0f
+        float YawRate_rads,
+        float AeroBrakeThreshold
     );
 
 
@@ -926,6 +1092,16 @@ public:
     virtual void PostRegisterAllComponents() override;
     virtual void PostInitializeComponents() override;
     virtual void OnConstruction(const FTransform& Transform) override;
+
+    //------------------------------------------------------------------------------
+    //                          network replication
+    //------------------------------------------------------------------------------
+    virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
+    /** Server RPC - client sends input to server */
+    UFUNCTION(Server, Unreliable)
+    void ServerUpdateInput(const FInputTensor& NewInput);
+    void ServerUpdateInput_Implementation(const FInputTensor& NewInput);
 
 #if WITH_EDITOR
     /** Editor support */
@@ -1001,12 +1177,32 @@ public:
     /** Game thread to physics thread input conduit (thread-safe double buffer) */
     TThreadLock<FInputTensor> InputConduit;              // [-] - GT -> PT input channel
 
+    //------------------------------------------------------------------------------
+    //                          replicated vehicle state
+    //------------------------------------------------------------------------------
+    /** Replicated vehicle transform for network sync */
+    UPROPERTY(Replicated)
+    FVector ReplicatedLocation;                          // [cm] - Synced position
+
+    UPROPERTY(Replicated)
+    FRotator ReplicatedRotation;                         // [deg] - Synced rotation
+
+    UPROPERTY(Replicated)
+    FVector ReplicatedVelocity;                          // [cm/s] - Synced linear velocity
+
+    UPROPERTY(Replicated)
+    FVector ReplicatedAngularVelocity;                   // [rad/s] - Synced angular velocity
+
     /** Game thread drivetrain specifications (engine, clutch, transmission, differential) */
     FDrivetrainSpecifications Drivetrain_GT;             // [-] - Drivetrain configuration (GT)
 
        /** Game thread aerodynamics package */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle|Aerodynamics")
     FAerodynamicPackage_GT AeroPackage_GT;  
+
+    /** Brake input threshold to activate aerodynamic braking [0..1] */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle|Aerodynamics", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+    float AeroBrakeThreshold = 0.65f; // [-] - Brake input threshold for aero activation  
 
     //--------------------------------------------------------------------------
     //                          AERODYNAMICS CONFIGURATION (GT)
