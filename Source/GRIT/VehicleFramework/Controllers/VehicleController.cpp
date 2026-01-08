@@ -63,7 +63,7 @@ static FAutoConsoleCommand TelemetryStatusCmd(
         UE_LOG(LogVehicleController, Warning, TEXT("📊 TELEMETRY STATUS:"));
         UE_LOG(LogVehicleController, Warning, TEXT("   Enabled: %s"), GbTelemetryEnabled ? TEXT("YES") : TEXT("NO"));
         UE_LOG(LogVehicleController, Warning, TEXT("   Buffer Size: %d samples"), GTelemetryBuffer.Num());
-        UE_LOG(LogVehicleController, Warning, TEXT("   Save Location: %s"), *FPaths::Combine(FPaths::ProjectDir(), TEXT("Saved"), TEXT("Telemetry")));
+        UE_LOG(LogVehicleController, Warning, TEXT("   Save Location: %s"), *FPaths::Combine(FPaths::ProjectDir(), TEXT("Source/GRIT/VehicleFramework/Telemetry")));
         
         if (GEngine)
         {
@@ -140,7 +140,10 @@ void AVehicleController::Tick(float DeltaTime)
     //------------------------------------------------------------------------------
     if (ControlledVehicle)
     {
-        if (IsLocalController() && !HasAuthority()) // Reason: local client sends RPCs
+        const bool bIsServer = HasAuthority();
+        const bool bIsLocal = IsLocalController();
+
+        if (bIsLocal && !bIsServer) // Reason: local client sends RPCs
         {
             if (!PendingInput.NearlyEquals(LastSentInput, 1.e-3f)) // Reason: delta compression
             {
@@ -148,9 +151,13 @@ void AVehicleController::Tick(float DeltaTime)
                 LastSentInput = PendingInput;
             } // End if (input changed)
         } // End if (client authority)
-        else if (HasAuthority()) // Reason: server applies directly
+        else if (bIsServer) // Reason: server applies directly
         {
-            ControlledVehicle->InputTensor_GameThread = PendingInput;
+            if (bIsLocal)
+            {
+                ControlledVehicle->InputTensor_GameThread = PendingInput;
+            }
+            // Remote players on the server receive input via ServerUpdateInput RPC.
         } // End if (server authority)
     } // End if (vehicle valid)
 
@@ -170,9 +177,21 @@ void AVehicleController::Tick(float DeltaTime)
         Sample.LocalRole = ControlledVehicle->GetLocalRole();
         Sample.RemoteRole = ControlledVehicle->GetRemoteRole();
         Sample.Ping = PlayerState ? PlayerState->GetPingInMilliseconds() : 0.0f; // [ms]
-        Sample.Throttle = ControlledVehicle->InputTensor_GameThread.Throttle;
-        Sample.Brake = ControlledVehicle->InputTensor_GameThread.Brake;
-        Sample.Steering = ControlledVehicle->InputTensor_GameThread.Steering;
+
+        // For local controllers, record the raw pending input values (what the player is pressing).
+        // For non-local controllers (server view of remote players), record the applied vehicle input tensor.
+        if (IsLocalController())
+        {
+            Sample.Throttle = PendingInput.Throttle;
+            Sample.Brake = PendingInput.Brake;
+            Sample.Steering = PendingInput.Steering;
+        }
+        else
+        {
+            Sample.Throttle = ControlledVehicle->InputTensor_GameThread.Throttle;
+            Sample.Brake = ControlledVehicle->InputTensor_GameThread.Brake;
+            Sample.Steering = ControlledVehicle->InputTensor_GameThread.Steering;
+        }
         
         if (UStaticMeshComponent* Hull = ControlledVehicle->VehicleHull)
         {
@@ -337,55 +356,153 @@ void AVehicleController::OnUnPossess()
     if (GbTelemetryEnabled && GTelemetryBuffer.Num() > 0)
     {
         FString ProjectDir = FPaths::ProjectDir();
-        FString TelemetryDir = FPaths::Combine(ProjectDir, TEXT("Saved"), TEXT("Telemetry"));
+        FString TelemetryDir = FPaths::Combine(ProjectDir, TEXT("Source/GRIT/VehicleFramework/Telemetry"));
         IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
         
-        if (!PlatformFile.DirectoryExists(*TelemetryDir)) // Reason: ensure directory exists
+        if (!PlatformFile.DirectoryExists(*TelemetryDir))
         {
             PlatformFile.CreateDirectory(*TelemetryDir);
-        } // End if (directory creation)
+        }
 
         FString Timestamp = FDateTime::Now().ToString(TEXT("%Y%m%d_%H%M%S"));
         FString PlayerID = GetName().Replace(TEXT("VehicleController"), TEXT("Player"));
-        FString Filename = FString::Printf(TEXT("Multiplayer_%s_%s.csv"), *PlayerID, *Timestamp);
-        FString FilePath = FPaths::Combine(TelemetryDir, Filename);
+        FString CsvFilename = FString::Printf(TEXT("Multiplayer_%s_%s.csv"), *PlayerID, *Timestamp);
+        FString CsvFilePath = FPaths::Combine(TelemetryDir, CsvFilename);
 
         FString CsvContent = TEXT("Timestamp,PlayerName,IsServer,IsLocalController,VehicleName,HasOwner,HasNetConnection,LocalRole,RemoteRole,Ping_ms,Throttle,Brake,Steering,LocationX,LocationY,LocationZ,VelX,VelY,VelZ,Speed_kmh,PacketsSent,PacketsReceived,BytesSent,BytesReceived\n");
 
-        FScopeLock Lock(&GTelemetryMutex);
-        for (const FMultiplayerTelemetry& Sample : GTelemetryBuffer)
-        {
-            FString RoleStr = (Sample.LocalRole == ROLE_Authority) ? TEXT("Authority") : (Sample.LocalRole == ROLE_AutonomousProxy) ? TEXT("AutonomousProxy") : TEXT("SimulatedProxy");
-            FString RemoteRoleStr = (Sample.RemoteRole == ROLE_Authority) ? TEXT("Authority") : (Sample.RemoteRole == ROLE_AutonomousProxy) ? TEXT("AutonomousProxy") : TEXT("SimulatedProxy");
-            
-            CsvContent += FString::Printf(TEXT("%.3f,%s,%d,%d,%s,%d,%d,%s,%s,%.1f,%.3f,%.3f,%.3f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%d,%d,%.1f,%.1f\n"), Sample.Timestamp, *Sample.PlayerName, Sample.bIsServer ? 1 : 0, Sample.bIsLocalController ? 1 : 0, *Sample.VehicleName, Sample.bVehicleHasOwner ? 1 : 0, Sample.bVehicleHasNetConnection ? 1 : 0, *RoleStr, *RemoteRoleStr, Sample.Ping, Sample.Throttle, Sample.Brake, Sample.Steering, Sample.Location.X, Sample.Location.Y, Sample.Location.Z, Sample.Velocity.X, Sample.Velocity.Y, Sample.Velocity.Z, Sample.Speed, Sample.PacketsSent, Sample.PacketsReceived, Sample.BytesSentPerSec, Sample.BytesReceivedPerSec);
-        } // End for (each sample)
+        FString MarkdownContent;
 
-        if (FFileHelper::SaveStringToFile(CsvContent, *FilePath))
+        TMap<FString, int32> SamplesPerPlayer;
+        TMap<FString, float> TotalPingPerPlayer;
+        TMap<FString, float> MinPingPerPlayer;
+        TMap<FString, float> MaxPingPerPlayer;
+        TSet<FString> ClientPlayerNames;
+        float MinTimestamp = 0.0f;
+        float MaxTimestamp = 0.0f;
+        bool bHasTimestamp = false;
+
         {
-            UE_LOG(LogVehicleController, Warning, TEXT("📊 MULTIPLAYER TELEMETRY SAVED | File: %s | Samples: %d | Location: %s"), *FilePath, GTelemetryBuffer.Num(), *TelemetryDir);
+            FScopeLock Lock(&GTelemetryMutex);
+            for (const FMultiplayerTelemetry& Sample : GTelemetryBuffer)
+            {
+                FString RoleStr = (Sample.LocalRole == ROLE_Authority) ? TEXT("Authority") : (Sample.LocalRole == ROLE_AutonomousProxy) ? TEXT("AutonomousProxy") : TEXT("SimulatedProxy");
+                FString RemoteRoleStr = (Sample.RemoteRole == ROLE_Authority) ? TEXT("Authority") : (Sample.RemoteRole == ROLE_AutonomousProxy) ? TEXT("AutonomousProxy") : TEXT("SimulatedProxy");
+                
+                CsvContent += FString::Printf(TEXT("%.3f,%s,%d,%d,%s,%d,%d,%s,%s,%.1f,%.3f,%.3f,%.3f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%d,%d,%.1f,%.1f\n"), Sample.Timestamp, *Sample.PlayerName, Sample.bIsServer ? 1 : 0, Sample.bIsLocalController ? 1 : 0, *Sample.VehicleName, Sample.bVehicleHasOwner ? 1 : 0, Sample.bVehicleHasNetConnection ? 1 : 0, *RoleStr, *RemoteRoleStr, Sample.Ping, Sample.Throttle, Sample.Brake, Sample.Steering, Sample.Location.X, Sample.Location.Y, Sample.Location.Z, Sample.Velocity.X, Sample.Velocity.Y, Sample.Velocity.Z, Sample.Speed, Sample.PacketsSent, Sample.PacketsReceived, Sample.BytesSentPerSec, Sample.BytesReceivedPerSec);
+
+                int32& SampleCount = SamplesPerPlayer.FindOrAdd(Sample.PlayerName);
+                SampleCount++;
+
+                float& TotalPing = TotalPingPerPlayer.FindOrAdd(Sample.PlayerName);
+                TotalPing += Sample.Ping;
+
+                float& MinPing = MinPingPerPlayer.FindOrAdd(Sample.PlayerName);
+                float& MaxPing = MaxPingPerPlayer.FindOrAdd(Sample.PlayerName);
+                if (SampleCount == 1)
+                {
+                    MinPing = Sample.Ping;
+                    MaxPing = Sample.Ping;
+                }
+                else
+                {
+                    MinPing = FMath::Min(MinPing, Sample.Ping);
+                    MaxPing = FMath::Max(MaxPing, Sample.Ping);
+                }
+
+                if (!Sample.bIsServer && Sample.bIsLocalController)
+                {
+                    ClientPlayerNames.Add(Sample.PlayerName);
+                }
+
+                if (!bHasTimestamp)
+                {
+                    MinTimestamp = Sample.Timestamp;
+                    MaxTimestamp = Sample.Timestamp;
+                    bHasTimestamp = true;
+                }
+                else
+                {
+                    MinTimestamp = FMath::Min(MinTimestamp, Sample.Timestamp);
+                    MaxTimestamp = FMath::Max(MaxTimestamp, Sample.Timestamp);
+                }
+            }
+
+            const int32 TotalSamples = GTelemetryBuffer.Num();
+            const int32 UniquePlayers = SamplesPerPlayer.Num();
+            const int32 TotalClients = ClientPlayerNames.Num();
+
+            MarkdownContent += TEXT("# Multiplayer Telemetry Summary\n\n");
+            MarkdownContent += FString::Printf(TEXT("- Session Timestamp: `%s`\n"), *Timestamp);
+            MarkdownContent += FString::Printf(TEXT("- Controller: `%s`\n"), *GetName());
+            MarkdownContent += FString::Printf(TEXT("- Samples: %d\n"), TotalSamples);
+            MarkdownContent += FString::Printf(TEXT("- Unique Players: %d\n"), UniquePlayers);
+            MarkdownContent += FString::Printf(TEXT("- Total Clients: %d\n"), TotalClients);
+            if (bHasTimestamp && MinTimestamp <= MaxTimestamp)
+            {
+                MarkdownContent += FString::Printf(TEXT("- Time Range (s): %.3f → %.3f\n"), MinTimestamp, MaxTimestamp);
+            }
+
+            MarkdownContent += TEXT("\n## Players\n\n");
+            for (const TPair<FString, int32>& Pair : SamplesPerPlayer)
+            {
+                const FString& PlayerName = Pair.Key;
+                const int32 PlayerSamples = Pair.Value;
+                const float TotalPing = TotalPingPerPlayer.FindRef(PlayerName);
+                const float AvgPing = PlayerSamples > 0 ? TotalPing / PlayerSamples : 0.0f;
+                const float MinPing = MinPingPerPlayer.FindRef(PlayerName);
+                const float MaxPing = MaxPingPerPlayer.FindRef(PlayerName);
+                const bool bIsClient = ClientPlayerNames.Contains(PlayerName);
+
+                MarkdownContent += FString::Printf(TEXT("- `%s`  \n  - Role: %s  \n  - Samples: %d  \n  - Ping ms: avg %.1f (min %.1f, max %.1f)\n"),
+                    *PlayerName,
+                    bIsClient ? TEXT("Client") : TEXT("Server"),
+                    PlayerSamples,
+                    AvgPing,
+                    MinPing,
+                    MaxPing);
+            }
+
+            GTelemetryBuffer.Empty();
+        }
+
+        if (FFileHelper::SaveStringToFile(CsvContent, *CsvFilePath))
+        {
+            const int32 TotalSamples = SamplesPerPlayer.Num() > 0 ? 0 : 0; // placeholder to keep patch context unique
+            UE_LOG(LogVehicleController, Warning, TEXT("📊 MULTIPLAYER TELEMETRY SAVED | File: %s | Samples: %d | Location: %s"), *CsvFilePath, TotalSamples, *TelemetryDir);
             
-            // Also log to screen for visibility
             if (GEngine)
             {
                 GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Green, 
-                    FString::Printf(TEXT("📊 Telemetry saved: %s (%d samples)"), *Filename, GTelemetryBuffer.Num()));
+                    FString::Printf(TEXT("📊 Telemetry saved: %s"), *CsvFilename));
             }
         }
         else
         {
-            UE_LOG(LogVehicleController, Error, TEXT("❌ FAILED TO WRITE TELEMETRY | File: %s"), *FilePath);
+            UE_LOG(LogVehicleController, Error, TEXT("❌ FAILED TO WRITE TELEMETRY | File: %s"), *CsvFilePath);
             
-            // Also log to screen for visibility
             if (GEngine)
             {
                 GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Red, 
-                    FString::Printf(TEXT("❌ Failed to save telemetry: %s"), *Filename));
+                    FString::Printf(TEXT("❌ Failed to save telemetry: %s"), *CsvFilename));
             }
-        } // End if (file write)
+        }
 
-        GTelemetryBuffer.Empty();
-    } // End if (telemetry write)
+        if (!MarkdownContent.IsEmpty())
+        {
+            FString MarkdownFilename = FString::Printf(TEXT("Multiplayer_%s_%s.md"), *PlayerID, *Timestamp);
+            FString MarkdownFilePath = FPaths::Combine(TelemetryDir, MarkdownFilename);
+
+            if (FFileHelper::SaveStringToFile(MarkdownContent, *MarkdownFilePath))
+            {
+                UE_LOG(LogVehicleController, Warning, TEXT("📄 MULTIPLAYER SUMMARY SAVED | File: %s"), *MarkdownFilePath);
+            }
+            else
+            {
+                UE_LOG(LogVehicleController, Error, TEXT("❌ FAILED TO WRITE TELEMETRY SUMMARY | File: %s"), *MarkdownFilePath);
+            }
+        }
+    }
 
     bConnectionEstablished = false;
     ControlledVehicle = nullptr;
