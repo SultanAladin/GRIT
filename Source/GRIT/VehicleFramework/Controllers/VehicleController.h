@@ -35,6 +35,7 @@ protected:
     virtual void SetupInputComponent() override;
     virtual void OnPossess(APawn* InPawn) override;
     virtual void OnUnPossess() override;
+    virtual void OnRep_Pawn() override;
 
     //------------------------------------------------------------------------------
     //                           enhanced input assets
@@ -70,6 +71,16 @@ protected:
     //------------------------------------------------------------------------------
     UPROPERTY(BlueprintReadOnly, Category = "Control")
     AVehicleSolver* ControlledVehicle = nullptr;
+
+    //------------------------------------------------------------------------------
+    //                           network replication
+    //------------------------------------------------------------------------------
+    /** Send input to server for authoritative processing */
+    UFUNCTION(Server, Unreliable, WithValidation)
+    void ServerSendInput(FInputTensor NewInput);
+    
+    /** Validation function for ServerSendInput RPC */
+    bool ServerSendInput_Validate(FInputTensor NewInput);
 
     //------------------------------------------------------------------------------
     //                                input handlers
@@ -146,32 +157,15 @@ protected:
 
 private:
     bool bConnectionEstablished = false;
+    
+    FInputTensor PendingInput;           // [-] - Local input state to send to server
+    FInputTensor LastSentInput;          // [-] - Previous sent input for delta compression
+    bool bInputDirty = false;            // [-] - Input changed this frame
 
     float TargetThrottle = 0.0f;         // [0..1]
     float TargetBrake = 0.0f;            // [0..1]
     float TargetSteering = 0.0f;         // [-1..1]
     float TargetHandbrake = 0.0f;        // [0..1]
-
-    /** Minimum pedal input to count as a tap for mode switching */
-    UPROPERTY(EditAnywhere, Category = "Input|Transmission")
-    float DriveModeTapThreshold = 0.1f;   // [-] - Minimum pedal input to count as tap (responsive)
-
-    /** Max interval between taps to register as a double-tap */
-    UPROPERTY(EditAnywhere, Category = "Input|Transmission")
-    float DriveModeDoubleTapWindow = 0.35f; // [s] - Max interval between taps
-
-    // --- Driving Mode State ---
-
-    /** True if the controller has latched reverse pedal mapping */
-    bool bIsInReverseMode = false;
-    /** True if aerodynamic braking is active while the brake pedal is held */
-    bool bIsAeroBraking = false;
-
-    float LastBrakeTapTime = -1.0f;       // [s] - Timestamp of previous brake tap
-    bool bBrakeTapHoldArmed = false;      // True when brake input is currently held
-
-    float LastThrottleTapTime = -1.0f;    // [s] - Timestamp of previous throttle tap
-    bool bThrottleTapHoldArmed = false;   // True when throttle input is currently held
 
     void EstablishVehicleConnection();
     void UpdateAnalogInputs(float DeltaTime);
