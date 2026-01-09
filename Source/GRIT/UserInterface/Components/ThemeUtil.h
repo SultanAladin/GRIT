@@ -1,7 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "../VehicleFramework/UserInterfaces/Verified/Components/ThemeConfig.h"
+#include "ThemeConfig.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "ThemeUtil.generated.h"
 

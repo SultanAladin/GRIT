@@ -1,5 +1,5 @@
 #include "ThemeUtil.h"
-#include "SessionAdapter.h"
+#include "GameContext/SessionAdapter.h"
 #include "Kismet/GameplayStatics.h"
 #include "Components/TextBlock.h"
 #include "Components/Border.h"

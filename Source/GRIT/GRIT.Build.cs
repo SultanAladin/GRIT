@@ -25,7 +25,8 @@ public class GRIT : ModuleRules
 			Path.Combine(ModuleDirectory, "VehicleFramework"),
 			Path.Combine(ModuleDirectory, "GameContext"),
 			Path.Combine(ModuleDirectory, "GameContext", "AuthenticationContext"),
-			Path.Combine(ModuleDirectory, "UserInterface")
+			Path.Combine(ModuleDirectory, "UserInterface"),
+			Path.Combine(ModuleDirectory, "UserInterface", "Components")
 		}
 		.Where(Directory.Exists)
 		.ToArray();
@@ -43,13 +44,13 @@ public class GRIT : ModuleRules
 			Path.Combine(ModuleDirectory, "VehicleFramework", "Controllers"),
 			Path.Combine(ModuleDirectory, "VehicleFramework", "Input"),
 			Path.Combine(ModuleDirectory, "VehicleFramework", "UserInterfaces"),
-			Path.Combine(ModuleDirectory, "VehicleFramework", "UserInterfaces", "Verified"),
 			Path.Combine(ModuleDirectory, "GameContext"),
 			Path.Combine(ModuleDirectory, "GameContext", "SpawnControl"),
 			Path.Combine(ModuleDirectory, "GameContext", "ColourCodex", "Public"),
 			Path.Combine(ModuleDirectory, "GameContext", "ColourCodex", "Private"),
 			Path.Combine(ModuleDirectory, "GameContext", "AuthenticationContext"),
-			Path.Combine(ModuleDirectory, "UserInterface")
+			Path.Combine(ModuleDirectory, "UserInterface"),
+			Path.Combine(ModuleDirectory, "UserInterface", "Components")
 		}
 		.Where(Directory.Exists)
 		.ToArray();

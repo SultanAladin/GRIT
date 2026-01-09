@@ -3,7 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstance.h"
-#include "../VehicleFramework/UserInterfaces/Verified/Components/ThemeConfig.h"
+#include "UserInterface/Components/ThemeConfig.h"
 #include "UserPreferences.h"
 #include "SessionAdapter.generated.h"
 

@@ -7,7 +7,7 @@
 #include "Styling/SlateBrush.h"
 #include "Fonts/SlateFontInfo.h"
 #include "GenericButton.h"
-#include "Verified/Components/ThemeConfig.h"
+#include "UserInterface/Components/ThemeConfig.h"
 #include "UIToolkit.generated.h"
 
 /*====================================================================================================================================
