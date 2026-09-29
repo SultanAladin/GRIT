@@ -1,0 +1,33 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "1.0",
+  "FriendlyName": "Epic Adapter Plugin",
+  "Description": "Epic Online Services adapter plugin with EOS SDK integration. Early initialization for EOS before engine fully loads.",
+  "Category": "Runtime",
+  "CreatedBy": "Your Name",
+  "CreatedByURL": "",
+  "DocsURL": "",
+  "MarketplaceURL": "",
+  "SupportURL": "",
+  "CanContainContent": false,
+  "IsBetaVersion": false,
+  "IsExperimentalVersion": false,
+  "Installed": false,
+  "Modules": [
+    {
+      "Name": "EpicAdapter",
+      "Type": "Runtime",
+      "LoadingPhase": "PostConfigInit",
+      "WhitelistPlatforms": [ "Win64", "Mac", "Linux" ],
+      "AdditionalMetadata": "Early initialization - loads before engine for EOS setup"
+    }
+  ],
+  "Plugins": [
+    {
+      "Name": "EnhancedInput",
+      "Enabled": true
+    }
+  ],
+  "Tags": [ "EOS", "EpicAdapter", "EarlyInit", "Networking" ]
+}

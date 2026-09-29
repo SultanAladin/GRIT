@@ -1,0 +1,1520 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Sky Atmosphere Studio — Multi-Dome Portal</title>
+<style>
+:root {
+  --es-scale: 0.85;
+  --es-bg: #000;
+  --es-fg: #e5e7eb;
+  --es-fg-dim: rgba(255,255,255,0.5);
+  --es-fg-mute: rgba(255,255,255,0.7);
+  --es-panel: rgba(0,0,0,0.4);
+  --es-line: rgba(255,255,255,0.1);
+  --es-line-strong: rgba(255,255,255,0.3);
+  --es-shadow: 0 25px 50px -12px rgba(0,0,0,0.6);
+  --es-accent: #fff;
+  --es-blue: #3b82f6;
+  --es-radius-card: 24px;
+  --es-radius-pill: 999px;
+}
+html, body {
+  margin: 0; overflow: hidden;
+  background: var(--es-bg); color: var(--es-fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  height: 100%;
+}
+#canvas { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; display:block; }
+::selection { background: rgba(255,255,255,0.2); }
+
+/* Header */
+.es-header {
+  position: absolute; top: 0; left: 0; width: 100%;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 24px 32px; z-index: 10; pointer-events: none; box-sizing: border-box;
+  transform: scale(var(--es-scale)); transform-origin: top center;
+}
+.es-header-brand { display: flex; align-items: center; gap: 16px; }
+.es-logo {
+  width: 44px; height: 44px; border-radius: 50%;
+  border: 1px solid var(--es-line-strong);
+  background: rgba(0,0,0,0.2);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  display: flex; align-items: center; justify-content: center; color: #fff;
+}
+.es-title { font-size: 24px; font-weight: 300; letter-spacing: 0.03em; color:#fff; margin:0; line-height:1; }
+.es-subtitle { font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--es-fg-dim); margin: 4px 0 0; }
+
+.es-tabs {
+  pointer-events: auto; display:flex; align-items:center;
+  background: var(--es-panel);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--es-line);
+  border-radius: var(--es-radius-pill);
+  padding: 6px 18px; box-shadow: var(--es-shadow); gap: 4px;
+}
+.es-tab {
+  background: transparent; border:none; cursor:pointer;
+  color: var(--es-fg-dim); font-size: 12px; font-weight: 500;
+  padding: 6px 18px; border-radius: var(--es-radius-pill);
+  transition: background-color .25s, color .25s; font-family: inherit;
+}
+.es-tab:hover { color: rgba(255,255,255,0.85); }
+.es-tab.is-active { background: rgba(255,255,255,0.12); color: #fff; }
+
+.es-header-spacer { width: 44px; height: 44px; }
+
+/* Right panel */
+.es-panel {
+  position: absolute; right: 24px; top: 50%;
+  transform: translateY(-50%) scale(var(--es-scale));
+  transform-origin: right center;
+  width: 360px; max-height: 86vh;
+  background: var(--es-panel);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--es-line);
+  border-radius: var(--es-radius-card);
+  padding: 22px;
+  z-index: 10; pointer-events: auto;
+  box-shadow: var(--es-shadow);
+  display: flex; flex-direction: column; overflow-y: auto;
+  box-sizing: border-box;
+}
+.es-panel::-webkit-scrollbar { width: 6px; }
+.es-panel::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+
+.es-tab-content { display: none; flex-direction: column; gap: 24px; animation: es-fadeIn .3s ease-out; }
+.es-tab-content.is-active { display: flex; }
+@keyframes es-fadeIn { from {opacity:0; transform:translateY(5px);} to {opacity:1; transform:translateY(0);} }
+
+.es-section { display:flex; flex-direction:column; gap: 14px; }
+.es-section-title {
+  display: flex; align-items: center; gap: 8px; margin: 0;
+  font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.12em;
+  color: var(--es-fg-dim);
+}
+.es-row { display:flex; flex-direction:column; gap:6px; }
+.es-row-inline { display:flex; align-items:center; justify-content:space-between; }
+.es-label { font-size: 12px; color: var(--es-fg-mute); }
+.es-value { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11px; color: var(--es-fg-mute); }
+
+.es-slider {
+  -webkit-appearance: none; appearance: none; width: 100%; height: 5px;
+  background: rgba(255,255,255,0.1); border-radius: var(--es-radius-pill);
+  outline: none; cursor: pointer;
+}
+.es-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; background: #fff; border-radius: 50%; cursor: pointer; }
+.es-slider::-moz-range-thumb { width: 14px; height: 14px; background: #fff; border: none; border-radius: 50%; cursor: pointer; }
+
+.es-seg { display:flex; gap:6px; background: rgba(255,255,255,0.05); padding: 4px; border-radius: 12px; }
+.es-seg-btn {
+  flex: 1; padding: 7px 0; border: none; background: transparent;
+  color: var(--es-fg-dim); font-size: 11px; font-weight: 500; border-radius: 8px;
+  cursor: pointer; font-family: inherit; transition: background-color .2s, color .2s;
+}
+.es-seg-btn:hover { color: rgba(255,255,255,.85); }
+.es-seg-btn.is-active { background: rgba(255,255,255,0.18); color: #fff; }
+
+.es-toggle { width: 38px; height: 22px; background: rgba(255,255,255,0.1); border-radius: var(--es-radius-pill); padding: 3px; box-sizing: border-box; cursor: pointer; transition: background-color .3s; position: relative; flex-shrink: 0; }
+.es-toggle.is-on { background: var(--es-blue); }
+.es-toggle-knob { width: 16px; height: 16px; background: #fff; border-radius: 50%; transition: transform .3s; transform: translateX(0); }
+.es-toggle.is-on .es-toggle-knob { transform: translateX(16px); }
+
+.es-btn {
+  width: 100%; padding: 10px; border-radius: 12px;
+  background: rgba(255,255,255,0.08); color: #fff; border: 1px solid rgba(255,255,255,0.05);
+  font-size: 12px; font-weight: 500; font-family: inherit; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  transition: background-color .2s;
+}
+.es-btn:hover { background: rgba(255,255,255,0.16); }
+.es-btn-primary { padding: 12px; border-radius: 14px; background: #fff; color: #000; }
+.es-btn-primary:hover { background: #e5e7eb; }
+
+.es-dome-list { display: flex; flex-direction: column; gap: 6px; }
+.es-dome-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border-radius: 12px;
+  background: rgba(255,255,255,0.04); border: 1px solid var(--es-line);
+  cursor: pointer; transition: background-color .2s, border-color .2s;
+}
+.es-dome-item:hover { background: rgba(255,255,255,0.08); }
+.es-dome-item.is-active { background: rgba(255,255,255,0.12); border-color: var(--es-line-strong); }
+.es-dome-swatch { width: 14px; height: 14px; border-radius: 4px; flex-shrink: 0; }
+.es-dome-name { font-size: 13px; color: #fff; flex: 1; }
+.es-dome-meta { font-size: 10px; color: var(--es-fg-dim); font-family: ui-monospace, Consolas, monospace; }
+
+/* HUD bottom-left */
+.es-hud {
+  position: absolute; bottom: 24px; left: 24px; z-index: 10;
+  background: var(--es-panel);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--es-line);
+  border-radius: 16px; padding: 12px 16px;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px; color: var(--es-fg-mute);
+  pointer-events: none;
+  line-height: 1.7;
+  box-shadow: var(--es-shadow);
+}
+.es-hud b { color: #fff; font-weight: 600; }
+.es-hud .dim { color: var(--es-fg-dim); }
+
+/* Bottom controls strip */
+.es-bottombar {
+  position: absolute; bottom: 24px; left: 50%;
+  transform: translateX(-50%) scale(var(--es-scale));
+  transform-origin: bottom center;
+  display: flex; align-items: center; gap: 8px;
+  background: var(--es-panel);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--es-line);
+  border-radius: var(--es-radius-pill);
+  padding: 8px 14px;
+  z-index: 10; pointer-events: auto;
+  box-shadow: var(--es-shadow);
+}
+.es-bottombar .es-tab { padding: 6px 14px; }
+
+.kbd {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 10px; padding: 2px 6px; border-radius: 4px;
+  background: rgba(255,255,255,0.08); border: 1px solid var(--es-line);
+  color: #fff;
+}
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+
+<!-- Header -->
+<div class="es-header">
+  <div class="es-header-brand">
+    <div class="es-logo">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18"/></svg>
+    </div>
+    <div>
+      <h1 class="es-title">Sky Atmosphere Studio</h1>
+      <p class="es-subtitle">Multi-Dome · Portal Preview</p>
+    </div>
+  </div>
+  <div class="es-tabs" id="tabs">
+    <button class="es-tab is-active" data-tab="domes">Domes</button>
+    <button class="es-tab" data-tab="sun">Sun</button>
+    <button class="es-tab" data-tab="atmo">Atmosphere</button>
+    <button class="es-tab" data-tab="fog">Fog</button>
+    <button class="es-tab" data-tab="clouds">Clouds</button>
+    <button class="es-tab" data-tab="camera">Camera</button>
+  </div>
+  <div class="es-header-spacer"></div>
+</div>
+
+<!-- Right panel -->
+<div class="es-panel" id="panel">
+  <!-- DOMES TAB -->
+  <div class="es-tab-content is-active" data-tab="domes">
+    <div class="es-section">
+      <h3 class="es-section-title">Domes in scene</h3>
+      <div class="es-dome-list" id="domeList"></div>
+      <div style="display:flex; gap:8px;">
+        <button class="es-btn" id="addDome">+ Add dome</button>
+        <button class="es-btn" id="removeDome">Remove</button>
+      </div>
+    </div>
+    <div class="es-section">
+      <h3 class="es-section-title">Teleport to</h3>
+      <div class="es-dome-list" id="teleportList"></div>
+    </div>
+    <div class="es-section">
+      <h3 class="es-section-title">Selected dome</h3>
+      <div class="es-row">
+        <div class="es-row-inline"><span class="es-label">Preset</span></div>
+        <div class="es-seg" id="presetSeg">
+          <button class="es-seg-btn" data-preset="clear">Clear</button>
+          <button class="es-seg-btn" data-preset="hazy">Hazy</button>
+          <button class="es-seg-btn" data-preset="overcast">Overcast</button>
+          <button class="es-seg-btn" data-preset="sunset">Sunset</button>
+          <button class="es-seg-btn" data-preset="twilight">Twilight</button>
+          <button class="es-seg-btn" data-preset="night">Night</button>
+        </div>
+      </div>
+      <div class="es-row" id="row-radius"></div>
+      <div class="es-row" id="row-px"></div>
+      <div class="es-row" id="row-py"></div>
+      <div class="es-row" id="row-pz"></div>
+    </div>
+  </div>
+
+  <!-- SUN TAB -->
+  <div class="es-tab-content" data-tab="sun">
+    <div class="es-section">
+      <h3 class="es-section-title">Sun direction</h3>
+      <div class="es-row" id="row-sunAz"></div>
+      <div class="es-row" id="row-sunEl"></div>
+      <div class="es-row" id="row-sunSize"></div>
+      <div class="es-row" id="row-sunIntensity"></div>
+      <div class="es-row" id="row-sunTemp"></div>
+    </div>
+  </div>
+
+  <!-- ATMO TAB -->
+  <div class="es-tab-content" data-tab="atmo">
+    <div class="es-section">
+      <h3 class="es-section-title">Scattering</h3>
+      <div class="es-row" id="row-rayleigh"></div>
+      <div class="es-row" id="row-mie"></div>
+      <div class="es-row" id="row-mieG"></div>
+      <div class="es-row" id="row-ozone"></div>
+      <div class="es-row" id="row-turbidity"></div>
+      <div class="es-row" id="row-groundAlb"></div>
+    </div>
+  </div>
+
+  <!-- FOG TAB -->
+  <div class="es-tab-content" data-tab="fog">
+    <div class="es-section">
+      <h3 class="es-section-title">Volumetric fog</h3>
+      <div class="es-row" id="row-fogDensity"></div>
+      <div class="es-row" id="row-fogHeight"></div>
+      <div class="es-row" id="row-fogFalloff"></div>
+      <div class="es-row" id="row-fogG"></div>
+    </div>
+  </div>
+
+  <!-- CLOUDS TAB -->
+  <div class="es-tab-content" data-tab="clouds">
+    <div class="es-section">
+      <h3 class="es-section-title">Cloud layer</h3>
+      <div class="es-row es-row-inline"><span class="es-label">Enabled</span><div class="es-toggle is-on" id="cloudsToggle"><div class="es-toggle-knob"></div></div></div>
+      <div class="es-row" id="row-cloudCoverage"></div>
+      <div class="es-row" id="row-cloudDensity"></div>
+      <div class="es-row" id="row-cloudAlt"></div>
+      <div class="es-row" id="row-cloudThickness"></div>
+      <div class="es-row" id="row-cloudScale"></div>
+      <div class="es-row" id="row-cloudSpeed"></div>
+    </div>
+  </div>
+
+  <!-- CAMERA TAB -->
+  <div class="es-tab-content" data-tab="camera">
+    <div class="es-section">
+      <h3 class="es-section-title">Camera</h3>
+      <div class="es-row" id="row-fov"></div>
+      <div class="es-row" id="row-exposure"></div>
+      <div class="es-row" id="row-flySpeed"></div>
+      <div class="es-row es-row-inline"><span class="es-label">Show dome shells</span><div class="es-toggle is-on" id="shellToggle"><div class="es-toggle-knob"></div></div></div>
+      <div class="es-row es-row-inline"><span class="es-label">Show ground</span><div class="es-toggle is-on" id="groundToggle"><div class="es-toggle-knob"></div></div></div>
+      <button class="es-btn" id="recenter">Center on selected dome</button>
+      <button class="es-btn" id="resetView">Reset view</button>
+    </div>
+    <div class="es-section">
+      <h3 class="es-section-title">Quality</h3>
+      <div class="es-row" id="row-atmoSteps"></div>
+      <div class="es-row" id="row-cloudSteps"></div>
+      <div class="es-row es-row-inline"><span class="es-label">Resolution scale</span></div>
+      <div class="es-seg" id="resSeg">
+        <button class="es-seg-btn" data-res="0.5">50%</button>
+        <button class="es-seg-btn is-active" data-res="0.75">75%</button>
+        <button class="es-seg-btn" data-res="1.0">100%</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- HUD -->
+<div class="es-hud" id="hud">
+  <div><b>WASD</b> walk &nbsp; <b>Space/Ctrl</b> up/down &nbsp; <b>Q/E</b> dive/climb &nbsp; <b>Mouse-drag</b> look &nbsp; <b>Shift</b> boost &nbsp; <b>1–6</b> teleport</div>
+  <div class="dim">pos: <span id="hudPos">0,0,0</span> &nbsp; inside: <span id="hudInside">—</span> &nbsp; <span id="hudFps">— fps</span></div>
+</div>
+
+<!-- Bottom bar -->
+<div class="es-bottombar">
+  <button class="es-tab is-active" id="btnFreefly">Free-fly</button>
+  <button class="es-tab" id="btnOrbit">Orbit</button>
+  <button class="es-tab" id="btnTour">Tour</button>
+</div>
+
+<script id="vertShader" type="x-shader/x-vertex">#version 300 es
+in vec2 aPos;
+out vec2 vUV;
+void main(){
+  vUV = aPos * 0.5 + 0.5;
+  gl_Position = vec4(aPos, 0.0, 1.0);
+}
+</script>
+
+<script id="fragShader" type="x-shader/x-fragment">#version 300 es
+precision highp float;
+in vec2 vUV;
+out vec4 oColor;
+
+#define MAX_DOMES 6
+
+uniform vec2  uResolution;
+uniform float uTime;
+uniform mat4  uInvViewProj;
+uniform vec3  uCamPos;
+uniform float uExposure;
+uniform int   uShowShells;
+uniform int   uShowGround;
+uniform int   uAtmoSteps;
+uniform int   uCloudSteps;
+
+uniform int   uDomeCount;
+uniform vec4  uDomePos[MAX_DOMES];      // xyz=center, w=radius
+uniform vec4  uSunDirInt[MAX_DOMES];    // xyz=sunDir (normalized), w=intensity
+uniform vec4  uSunColor[MAX_DOMES];     // rgb=color, a=sun angular radius (cos)
+uniform vec4  uAtmoA[MAX_DOMES];        // x=rayleighMul y=mieMul z=mieG w=ozoneMul
+uniform vec4  uAtmoB[MAX_DOMES];        // x=turbidity y=groundAlb z=tint(packed) w=presetId
+uniform vec4  uAtmoTint[MAX_DOMES];     // rgb=tint
+uniform vec4  uDomeWire[MAX_DOMES];     // rgb=wire color
+uniform vec4  uFog[MAX_DOMES];          // x=density y=heightOrigin z=falloff w=g
+uniform vec4  uFogColor[MAX_DOMES];
+uniform vec4  uCloud[MAX_DOMES];        // x=coverage y=density z=baseAlt w=thickness
+uniform vec4  uCloud2[MAX_DOMES];       // x=scale y=speed z=enabled w=windAng
+
+// ============================================================
+// Atmosphere — virtual Earth-scale; the dome bounds only define
+// WHERE this atmosphere applies in world space. The atmosphere
+// itself is always evaluated as if we were on a real planet.
+// All scattering math is in kilometres (Bruneton 2008 / Hillaire 2020).
+// ============================================================
+const float PI = 3.14159265358979;
+// km units
+const float Rg_km = 6360.0;   // planet ground radius
+const float Ra_km = 6420.0;   // atmosphere top
+const float Hr_km = 8.0;      // Rayleigh scale height
+const float Hm_km = 1.2;      // Mie scale height
+// Scattering coefficients per km (1/km), Bruneton constants converted
+const vec3  betaR_km = vec3(5.802e-3, 13.558e-3, 33.1e-3);
+const vec3  betaM_km = vec3(3.996e-3);
+const vec3  betaO_km = vec3(0.650e-3, 1.881e-3, 0.085e-3);
+
+struct Atmo {
+  vec3 betaR, betaM, betaO;
+  float mieG;
+  float groundAlb;
+  float Hr, Hm;
+};
+
+Atmo makeAtmo(int i){
+  Atmo a;
+  a.Hr = Hr_km;
+  a.Hm = Hm_km;
+  a.betaR = betaR_km * uAtmoA[i].x;
+  a.betaM = betaM_km * uAtmoA[i].y;
+  a.betaO = betaO_km * uAtmoA[i].w;
+  a.mieG = uAtmoA[i].z;
+  a.groundAlb = uAtmoB[i].y;
+  return a;
+}
+
+// Map a world position inside dome i to a "virtual sky position".
+// Camera sits at ground level + small altitude; horizon = dome equator.
+// World offset from dome center, scaled so the dome maps to a small
+// patch on the virtual planet surface (~atmosphere thickness).
+vec3 worldToSky(int i, vec3 p){
+  vec3 c = uDomePos[i].xyz;
+  vec3 d = p - c;
+  // Camera height above virtual ground (m -> km), clamped
+  float h_km = max(d.y, 0.0) * 0.001;
+  // Position on virtual planet: at the north pole, height = h_km above Rg
+  return vec3(0.0, Rg_km + h_km, 0.0);
+}
+
+// ============================================================
+// Phase functions
+// ============================================================
+float phaseRayleigh(float cosT){
+  return (3.0/(16.0*PI)) * (1.0 + cosT*cosT);
+}
+float phaseHG(float cosT, float g){
+  float g2 = g*g;
+  float denom = 1.0 + g2 - 2.0*g*cosT;
+  return (1.0 - g2) / (4.0*PI * denom * sqrt(max(denom, 1e-4)));
+}
+float phaseMie(float cosT, float g){
+  // Cornette-Shanks
+  float g2 = g*g;
+  float num = 3.0 * (1.0 - g2) * (1.0 + cosT*cosT);
+  float den = 2.0 * (2.0 + g2) * pow(1.0 + g2 - 2.0*g*cosT, 1.5);
+  return num / (4.0*PI*den);
+}
+
+// ============================================================
+// Ray-sphere
+// ============================================================
+vec2 raySphere(vec3 ro, vec3 rd, vec3 sc, float sr){
+  vec3 oc = ro - sc;
+  float b = dot(oc, rd);
+  float c = dot(oc, oc) - sr*sr;
+  float h = b*b - c;
+  if (h < 0.0) return vec2(-1.0, -1.0);
+  h = sqrt(h);
+  return vec2(-b - h, -b + h);
+}
+
+// ============================================================
+// Planet-relative density at virtual position p_km (km)
+// ============================================================
+vec3 densitiesPlanet(Atmo A, vec3 p_km){
+  float h = max(length(p_km) - Rg_km, 0.0);
+  float r = exp(-h / max(A.Hr, 1e-3));
+  float m = exp(-h / max(A.Hm, 1e-3));
+  // Ozone bell at ~25 km
+  float o = max(0.0, 1.0 - abs(h - 25.0) / 15.0);
+  return vec3(r, m, o);
+}
+
+// Ray-sphere centered at origin (km)
+vec2 raySphereO(vec3 ro, vec3 rd, float sr){
+  float b = dot(ro, rd);
+  float c = dot(ro, ro) - sr*sr;
+  float h = b*b - c;
+  if (h < 0.0) return vec2(-1.0, -1.0);
+  h = sqrt(h);
+  return vec2(-b - h, -b + h);
+}
+
+// Optical depth from p_km in direction dir_km, out to atmosphere top.
+vec3 opticalDepthToAtmo(Atmo A, vec3 p_km, vec3 dir, int steps){
+  vec2 h = raySphereO(p_km, dir, Ra_km);
+  float far = h.y > 0.0 ? h.y : 0.0;
+  if (far <= 0.0) return vec3(0.0);
+  // If looking down through planet, give large optical depth
+  vec2 hg = raySphereO(p_km, dir, Rg_km);
+  if (hg.x > 0.0 && hg.x < far) return vec3(1e6);
+  float dt = far / float(steps);
+  vec3 od = vec3(0.0);
+  for (int k=0;k<16;k++){
+    if (k >= steps) break;
+    vec3 q = p_km + dir * (dt * (float(k) + 0.5));
+    od += densitiesPlanet(A, q) * dt;
+  }
+  return od;
+}
+
+vec3 transmittance(Atmo A, vec3 od){
+  vec3 ext = A.betaR * od.x + (A.betaM * 1.11) * od.y + A.betaO * od.z;
+  return exp(-ext);
+}
+
+// ============================================================
+// Cloud noise (3D-ish via 2 layers of value+worley)
+// ============================================================
+float hash13(vec3 p){
+  p = fract(p * vec3(443.8975, 397.2973, 491.1871));
+  p += dot(p, p.yzx + 19.27);
+  return fract((p.x + p.y) * p.z);
+}
+float vnoise(vec3 p){
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  f = f*f*(3.0-2.0*f);
+  float a = hash13(i+vec3(0,0,0));
+  float b = hash13(i+vec3(1,0,0));
+  float c = hash13(i+vec3(0,1,0));
+  float d = hash13(i+vec3(1,1,0));
+  float e = hash13(i+vec3(0,0,1));
+  float g = hash13(i+vec3(1,0,1));
+  float h = hash13(i+vec3(0,1,1));
+  float k = hash13(i+vec3(1,1,1));
+  return mix(mix(mix(a,b,f.x),mix(c,d,f.x),f.y),
+             mix(mix(e,g,f.x),mix(h,k,f.x),f.y), f.z);
+}
+float fbm(vec3 p){
+  float v = 0.0, a = 0.5;
+  for (int j=0; j<5; j++){
+    v += a * vnoise(p);
+    p *= 2.03;
+    a *= 0.5;
+  }
+  return v;
+}
+float worley(vec3 p){
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  float md = 1.0;
+  for (int x=-1;x<=1;x++)
+  for (int y=-1;y<=1;y++)
+  for (int z=-1;z<=1;z++){
+    vec3 g = vec3(x,y,z);
+    vec3 o = vec3(
+      hash13(i+g+vec3(1.1,0.0,0.0)),
+      hash13(i+g+vec3(0.0,1.7,0.0)),
+      hash13(i+g+vec3(0.0,0.0,2.3))
+    );
+    float d = length(g + o - f);
+    md = min(md, d);
+  }
+  return md;
+}
+// Cloud density at world position p, within shell [r0,r1] around dome center c
+float cloudDensity(int i, vec3 p){
+  if (uCloud2[i].z < 0.5) return 0.0;
+  vec3 c = uDomePos[i].xyz;
+  float R = uDomePos[i].w;
+  float h = length(p - c) - uDomePos[i].w * 0.985;  // height above "ground"
+  float baseAlt = uCloud[i].z;
+  float thick   = uCloud[i].w;
+  float h0 = baseAlt;
+  float h1 = baseAlt + thick;
+  if (h < h0 || h > h1) return 0.0;
+  float vertical = smoothstep(h0, h0 + thick*0.2, h) * (1.0 - smoothstep(h1 - thick*0.2, h1, h));
+  // Wind: rotate in XZ
+  float ang = uCloud2[i].w;
+  vec2 wind = vec2(cos(ang), sin(ang)) * uCloud2[i].y * uTime * 60.0;
+  float scale = uCloud2[i].x;
+  vec3 q = (p - c) / max(R * 0.02, 1.0) * scale;
+  q.xz += wind * 0.001;
+  float base = fbm(q * 0.4);
+  float detail = (1.0 - worley(q * 2.0)) * 0.6 + worley(q * 5.0) * 0.4;
+  float dens = base * 1.2 - (1.0 - uCloud[i].x);
+  dens = max(0.0, dens);
+  dens *= mix(1.0, detail, 0.55);
+  dens *= vertical;
+  return dens * uCloud[i].y;
+}
+// Cheap light march for clouds toward sun
+float cloudLight(int i, vec3 p, vec3 lightDir){
+  float d = 0.0;
+  float t = 0.0;
+  float step = uDomePos[i].w * 0.01;
+  for (int k=0;k<4;k++){
+    t += step;
+    d += cloudDensity(i, p + lightDir * t);
+    step *= 1.8;
+  }
+  return exp(-d * 1.6);
+}
+
+// ============================================================
+// Sky color for a view ray on virtual planet (Hillaire single-scatter).
+// rd is world view dir; we interpret rd directly as the sky direction
+// (rd.y up). The dome's "ground" is the y=0 plane at dome center.
+// ============================================================
+vec3 skyColor(int i, vec3 rd, vec3 sunDir, vec3 sunCol, float sunI, out vec3 transOut){
+  Atmo A = makeAtmo(i);
+
+  // Virtual eye sits 100m above virtual ground at the "north pole"
+  vec3 eye = vec3(0.0, Rg_km + 0.1, 0.0);
+
+  // Ground hit (below horizon → ground color)
+  bool hitGround = false;
+  float tGround = 0.0;
+  vec2 hg = raySphereO(eye, rd, Rg_km);
+  if (hg.x > 0.0){ hitGround = true; tGround = hg.x; }
+
+  // Atmosphere far
+  vec2 ha = raySphereO(eye, rd, Ra_km);
+  float tFar = ha.y > 0.0 ? ha.y : 0.0;
+  float tEnd = hitGround ? tGround : tFar;
+  if (tEnd <= 0.0){ transOut = vec3(1.0); return vec3(0.0); }
+
+  int N = uAtmoSteps;
+  float dt = tEnd / float(N);
+  float cosT = dot(rd, sunDir);
+  float phR = phaseRayleigh(cosT);
+  float phM = phaseMie(cosT, A.mieG);
+
+  vec3 totalR = vec3(0.0);
+  vec3 totalM = vec3(0.0);
+  vec3 odView = vec3(0.0);
+
+  for (int k=0;k<128;k++){
+    if (k >= N) break;
+    vec3 p = eye + rd * (dt * (float(k) + 0.5));
+    vec3 dens = densitiesPlanet(A, p) * dt;
+    odView += dens;
+    vec3 odLight = opticalDepthToAtmo(A, p, sunDir, 8);
+    vec3 Tcam = transmittance(A, odView);
+    vec3 Tlight = transmittance(A, odLight);
+    vec3 inscat = Tcam * Tlight;
+    totalR += inscat * dens.x;
+    totalM += inscat * dens.y;
+  }
+
+  vec3 sky = (totalR * A.betaR * phR + totalM * A.betaM * phM) * sunCol * sunI;
+  transOut = transmittance(A, odView);
+
+  // Simple horizon haze: tint sky toward fog color near horizon
+  float horizon = 1.0 - max(rd.y, 0.0);
+  float fogDens = uFog[i].x;
+  if (fogDens > 0.0){
+    float hzAmt = clamp(horizon * horizon * fogDens * 200.0, 0.0, 0.9);
+    sky = mix(sky, uFogColor[i].rgb * sunCol * sunI * 0.06, hzAmt);
+  }
+
+  // Ground albedo contribution if we hit ground
+  if (hitGround){
+    vec3 pg = eye + rd * tGround;
+    vec3 nrm = normalize(pg);
+    float NoL = max(dot(nrm, sunDir), 0.0);
+    vec3 odG = opticalDepthToAtmo(A, pg, sunDir, 8);
+    vec3 Tg = transmittance(A, odG);
+    vec3 groundLit = vec3(A.groundAlb) * sunCol * sunI * NoL * Tg / PI;
+    sky += transOut * groundLit;
+  }
+  return sky;
+}
+
+// Cloud raymarch on virtual planet shell (matches sky basis)
+vec3 cloudsLayer(int i, vec3 rd, vec3 sunDir, vec3 sunCol, float sunI, out float cloudTrans){
+  cloudTrans = 1.0;
+  if (uCloud2[i].z < 0.5) return vec3(0.0);
+  Atmo A = makeAtmo(i);
+  vec3 eye = vec3(0.0, Rg_km + 0.1, 0.0);
+  float base_km = uCloud[i].z * 0.001;
+  float thick_km = uCloud[i].w * 0.001;
+  float r0 = Rg_km + base_km;
+  float r1 = Rg_km + base_km + thick_km;
+  vec2 hOut = raySphereO(eye, rd, r1);
+  vec2 hIn  = raySphereO(eye, rd, r0);
+  if (hOut.y <= 0.0) return vec3(0.0);
+  float t0 = max(hOut.x, 0.0);
+  float t1 = hOut.y;
+  // If looking up through r0 then we have a hole; just march outer shell
+  int Nc = uCloudSteps;
+  float seg = t1 - t0;
+  if (seg <= 0.0) return vec3(0.0);
+  float cdt = seg / float(Nc);
+  float cosT = dot(rd, sunDir);
+  float ph = mix(phaseHG(cosT, -0.2), phaseHG(cosT, 0.5), 0.6);
+  vec3 acc = vec3(0.0);
+  for (int k=0;k<96;k++){
+    if (k >= Nc) break;
+    float t = t0 + cdt * (float(k) + 0.5);
+    vec3 p_km = eye + rd * t;
+    float rp = length(p_km);
+    if (rp < r0 || rp > r1) continue;
+    // Use spherical UV for noise (lat,lon) to make clouds wrap consistently
+    vec3 n = normalize(p_km);
+    float lat = asin(clamp(n.y,-1.0,1.0));
+    float lon = atan(n.z, n.x);
+    float ang = uCloud2[i].w;
+    vec2 wind = vec2(cos(ang), sin(ang)) * uCloud2[i].y * uTime * 0.02;
+    vec3 q = vec3(lon * 30.0 + wind.x, (rp-r0)/max(thick_km,0.001) * 4.0, lat * 30.0 + wind.y);
+    q *= uCloud2[i].x;
+    float base = fbm(q * 0.5);
+    float detail = (1.0 - worley(q * 1.5)) * 0.5 + worley(q * 4.0) * 0.5;
+    float dens = base * 1.2 - (1.0 - uCloud[i].x);
+    dens = max(0.0, dens);
+    float vEnv = smoothstep(r0, r0 + thick_km*0.2, rp) * (1.0 - smoothstep(r1 - thick_km*0.2, r1, rp));
+    dens *= mix(0.5, 1.0, detail) * vEnv * uCloud[i].y;
+    if (dens <= 0.0) continue;
+    float ext = dens * cdt;
+    // light march
+    float ld = 0.0;
+    float ls = max(thick_km * 0.25, 0.05);
+    for (int j=0;j<4;j++){
+      vec3 lp = p_km + sunDir * (ls * float(j+1));
+      float lrp = length(lp);
+      if (lrp < r0 || lrp > r1) continue;
+      vec3 ln = normalize(lp);
+      float llat = asin(clamp(ln.y,-1.0,1.0));
+      float llon = atan(ln.z, ln.x);
+      vec3 lq = vec3(llon * 30.0 + wind.x, (lrp-r0)/max(thick_km,0.001) * 4.0, llat * 30.0 + wind.y);
+      lq *= uCloud2[i].x;
+      float lbase = fbm(lq * 0.5);
+      float ld_ = lbase * 1.2 - (1.0 - uCloud[i].x);
+      ld += max(0.0, ld_) * ls;
+    }
+    float lt = exp(-ld * 1.5);
+    vec3 amb = sunCol * 0.25 * vec3(0.7,0.8,1.0);
+    vec3 lin = sunCol * sunI * lt * ph + amb;
+    acc += lin * ext * cloudTrans;
+    cloudTrans *= exp(-ext * 1.6);
+    if (cloudTrans < 0.01) break;
+  }
+  return acc;
+}
+
+// ============================================================
+// Sun disk
+// ============================================================
+vec3 sunDisk(int i, vec3 rd){
+  vec3 sun = uSunDirInt[i].xyz;
+  float c = dot(rd, sun);
+  float minC = uSunColor[i].a;
+  if (c <= minC) return vec3(0.0);
+  float t = (c - minC) / max(1.0 - minC, 1e-4);
+  float limb = sqrt(max(t, 0.0));
+  return uSunColor[i].rgb * uSunDirInt[i].w * 30.0 * limb;
+}
+
+// ============================================================
+// Tonemap (ACES approx — Narkowicz)
+// ============================================================
+vec3 acesFilm(vec3 x){
+  const float a=2.51, b=0.03, c=2.43, d=0.59, e=0.14;
+  return clamp((x*(a*x+b))/(x*(c*x+d)+e), 0.0, 1.0);
+}
+
+// ============================================================
+// Main
+// ============================================================
+void main(){
+  vec2 ndc = vUV * 2.0 - 1.0;
+  vec4 world = uInvViewProj * vec4(ndc, 1.0, 1.0);
+  world /= world.w;
+  vec3 rd = normalize(world.xyz - uCamPos);
+  vec3 ro = uCamPos;
+
+  // Find the dome the camera is currently INSIDE (highest priority background)
+  int activeDome = -1;
+  float minDist = 1e30;
+  for (int i=0;i<MAX_DOMES;i++){
+    if (i >= uDomeCount) break;
+    vec3 d = uCamPos - uDomePos[i].xyz;
+    float r2 = dot(d,d);
+    if (r2 < uDomePos[i].w * uDomePos[i].w){
+      if (r2 < minDist){ minDist = r2; activeDome = i; }
+    }
+  }
+
+  vec3 color = vec3(0.0);
+  float sceneT = 1e30;
+
+  // Ground plane y = 0 (only render if camera is inside a dome)
+  if (activeDome >= 0 && uShowGround == 1 && rd.y < -0.0001){
+    float tPlane = (0.0 - uCamPos.y) / rd.y;
+    if (tPlane > 0.0){
+      vec3 hp = uCamPos + rd * tPlane;
+      // Stay inside the dome only
+      vec3 dc = hp - uDomePos[activeDome].xyz;
+      if (dot(dc, dc) < uDomePos[activeDome].w * uDomePos[activeDome].w){
+        sceneT = tPlane;
+        // Checker
+        vec2 q = hp.xz * 0.005;
+        float chk = mod(floor(q.x) + floor(q.y), 2.0);
+        vec3 alb = mix(vec3(0.18,0.20,0.22), vec3(0.32,0.34,0.36), chk);
+        // Lit by sun via dome params
+        int i = activeDome;
+        vec3 sunDir = uSunDirInt[i].xyz;
+        float NoL = max(sunDir.y, 0.0);
+        vec3 lit = alb * (uSunColor[i].rgb * uSunDirInt[i].w * NoL * 0.04
+                       +  uSunColor[i].rgb * 0.06);
+        // Distance fog
+        float fogAmt = 1.0 - exp(-tPlane * 0.00015);
+        vec3 trans;
+        vec3 skyHorizon = skyColor(i, normalize(vec3(rd.x, 0.0, rd.z)), sunDir, uSunColor[i].rgb, uSunDirInt[i].w, trans);
+        lit = mix(lit, skyHorizon, fogAmt);
+        color = lit;
+      }
+    }
+  }
+
+  if (sceneT >= 1e29 && activeDome >= 0){
+    int i = activeDome;
+    vec3 trans;
+    vec3 sky = skyColor(i, rd, uSunDirInt[i].xyz, uSunColor[i].rgb, uSunDirInt[i].w, trans);
+    vec3 sun = sunDisk(i, rd) * trans;
+    float cT;
+    vec3 cl = cloudsLayer(i, rd, uSunDirInt[i].xyz, uSunColor[i].rgb, uSunDirInt[i].w, cT);
+    color = (sky + sun) * cT + cl;
+  }
+  // else: outside any dome = black void (intended for portal preview)
+
+  // Tone-map & gamma the scene first
+  vec3 mapped = acesFilm(color * uExposure);
+  mapped = pow(mapped, vec3(1.0/2.2));
+
+  // Dome wireframe — drawn AFTER tonemap so it always reads clearly.
+  // Two-sided: front and back hemispheres, both rings + lat/lon grid.
+  if (uShowShells == 1){
+    vec3 wireSum = vec3(0.0);
+    float wireMask = 0.0;
+    for (int i=0; i<MAX_DOMES; i++){
+      if (i >= uDomeCount) break;
+      vec2 h = raySphere(ro, rd, uDomePos[i].xyz, uDomePos[i].w);
+      if (h.y <= 0.0) continue;
+      for (int pass=0; pass<2; pass++){
+        float tHit = (pass == 0) ? max(h.x, 0.0) : h.y;
+        if (tHit <= 0.0) continue;
+        vec3 hp = ro + rd * tHit;
+        vec3 n = normalize(hp - uDomePos[i].xyz);
+        // Wide great-circle rings: equator + 2 meridians + 2 tilted
+        float w = 0.025;
+        float ring = 0.0;
+        ring = max(ring, smoothstep(w, 0.0, abs(n.y)));
+        ring = max(ring, smoothstep(w, 0.0, abs(n.x)));
+        ring = max(ring, smoothstep(w, 0.0, abs(n.z)));
+        ring = max(ring, smoothstep(w, 0.0, abs(n.x + n.z) * 0.7071));
+        ring = max(ring, smoothstep(w, 0.0, abs(n.x - n.z) * 0.7071));
+        // Latitude grid (every 22.5°)
+        float lat = asin(clamp(n.y, -1.0, 1.0));
+        float latGrid = abs(fract(lat * 8.0 / PI + 0.5) - 0.5);
+        float latLine = smoothstep(0.48, 0.5, 1.0 - latGrid) * 0.55;
+        // Longitude grid (every 22.5°)
+        float lon = atan(n.z, n.x);
+        float lonGrid = abs(fract(lon * 8.0 / PI + 0.5) - 0.5);
+        // Hide longitude lines near poles where they bunch
+        float poleFade = 1.0 - smoothstep(0.85, 1.0, abs(n.y));
+        float lonLine = smoothstep(0.48, 0.5, 1.0 - lonGrid) * 0.55 * poleFade;
+        ring = max(ring, max(latLine, lonLine));
+        // Both sides always rendered: front pass full strength, back pass softer
+        float strength = (pass == 0) ? 1.0 : 0.6;
+        float fade = clamp(1.0 - tHit / 150000.0, 0.3, 1.0);
+        float v = ring * strength * fade;
+        wireSum += uDomeWire[i].rgb * v;
+        wireMask = max(wireMask, v);
+      }
+    }
+    // Composite as opaque-ish overlay on top of tonemapped scene
+    mapped = mix(mapped, wireSum * 1.4, clamp(wireMask, 0.0, 0.95));
+  }
+
+  oColor = vec4(mapped, 1.0);
+}
+</script>
+
+<script>
+"use strict";
+
+// ============================================================
+// State
+// ============================================================
+const MAX_DOMES = 6;
+
+function presetParams(name) {
+  switch(name){
+    case 'clear': return {
+      sunAz: 135, sunEl: 45, sunSize: 0.53, sunIntensity: 20.0, sunTemp: 5600,
+      rayleigh: 1.0, mie: 1.0, mieG: 0.76, ozone: 1.0, turbidity: 2.0, groundAlb: 0.3,
+      fogDensity: 0.0, fogHeight: 0, fogFalloff: 800, fogG: 0.3,
+      cloudCoverage: 0.42, cloudDensity: 1.0, cloudAlt: 1800, cloudThickness: 1200, cloudScale: 1.0, cloudSpeed: 0.15, cloudsOn: 1,
+      tint: [1,1,1]
+    };
+    case 'hazy': return {
+      sunAz: 90, sunEl: 38, sunSize: 0.53, sunIntensity: 18.0, sunTemp: 5400,
+      rayleigh: 1.1, mie: 2.6, mieG: 0.82, ozone: 0.9, turbidity: 5.0, groundAlb: 0.28,
+      fogDensity: 0.0, fogHeight: 0, fogFalloff: 600, fogG: 0.55,
+      cloudCoverage: 0.55, cloudDensity: 0.9, cloudAlt: 1500, cloudThickness: 1500, cloudScale: 1.0, cloudSpeed: 0.18, cloudsOn: 1,
+      tint: [1.02, 1.0, 0.96]
+    };
+    case 'overcast': return {
+      sunAz: 200, sunEl: 32, sunSize: 0.53, sunIntensity: 10.0, sunTemp: 6500,
+      rayleigh: 1.0, mie: 3.5, mieG: 0.86, ozone: 1.0, turbidity: 6.0, groundAlb: 0.4,
+      fogDensity: 0.0, fogHeight: 0, fogFalloff: 1200, fogG: 0.5,
+      cloudCoverage: 0.85, cloudDensity: 1.4, cloudAlt: 900, cloudThickness: 2200, cloudScale: 0.7, cloudSpeed: 0.25, cloudsOn: 1,
+      tint: [0.95, 0.97, 1.0]
+    };
+    case 'sunset': return {
+      sunAz: 270, sunEl: 3, sunSize: 0.62, sunIntensity: 22.0, sunTemp: 2400,
+      rayleigh: 1.0, mie: 1.6, mieG: 0.80, ozone: 1.0, turbidity: 4.0, groundAlb: 0.25,
+      fogDensity: 0.0, fogHeight: 0, fogFalloff: 700, fogG: 0.55,
+      cloudCoverage: 0.5, cloudDensity: 1.1, cloudAlt: 2200, cloudThickness: 1400, cloudScale: 0.9, cloudSpeed: 0.12, cloudsOn: 1,
+      tint: [1.05, 0.85, 0.75]
+    };
+    case 'twilight': return {
+      sunAz: 305, sunEl: -2, sunSize: 0.55, sunIntensity: 8.0, sunTemp: 2200,
+      rayleigh: 1.3, mie: 1.0, mieG: 0.75, ozone: 1.4, turbidity: 2.5, groundAlb: 0.18,
+      fogDensity: 0.0, fogHeight: 0, fogFalloff: 500, fogG: 0.3,
+      cloudCoverage: 0.38, cloudDensity: 0.9, cloudAlt: 2400, cloudThickness: 1200, cloudScale: 1.0, cloudSpeed: 0.1, cloudsOn: 1,
+      tint: [0.85, 0.78, 1.05]
+    };
+    case 'night': return {
+      sunAz: 90, sunEl: -20, sunSize: 0.55, sunIntensity: 0.6, sunTemp: 4500,
+      rayleigh: 1.5, mie: 0.7, mieG: 0.70, ozone: 1.0, turbidity: 2.0, groundAlb: 0.1,
+      fogDensity: 0.0, fogHeight: 0, fogFalloff: 600, fogG: 0.3,
+      cloudCoverage: 0.3, cloudDensity: 0.8, cloudAlt: 2500, cloudThickness: 1000, cloudScale: 1.0, cloudSpeed: 0.08, cloudsOn: 1,
+      tint: [0.6, 0.7, 1.1]
+    };
+  }
+}
+
+function kelvinToRGB(k){
+  // Tanner Helland approx
+  let t = k / 100;
+  let r,g,b;
+  if (t <= 66) r = 255;
+  else r = 329.698727446 * Math.pow(t-60, -0.1332047592);
+  if (t <= 66) g = 99.4708025861 * Math.log(t) - 161.1195681661;
+  else g = 288.1221695283 * Math.pow(t-60, -0.0755148492);
+  if (t >= 66) b = 255;
+  else if (t <= 19) b = 0;
+  else b = 138.5177312231 * Math.log(t-10) - 305.0447927307;
+  return [
+    Math.max(0, Math.min(255, r))/255,
+    Math.max(0, Math.min(255, g))/255,
+    Math.max(0, Math.min(255, b))/255
+  ];
+}
+
+function makeDome(preset, name, color, pos, radius){
+  const p = presetParams(preset);
+  return {
+    name, color, preset,
+    pos: pos.slice(),
+    radius,
+    ...p
+  };
+}
+
+const State = {
+  domes: [
+    makeDome('clear', 'Clear Noon', '#86c5ff', [0, 0, 0], 5000),
+  ],
+  selectedDome: 0,
+  camera: {
+    pos: [0, 200, -3500],
+    yaw: 0.0,
+    pitch: -0.12,
+    fov: 65,
+    speed: 1500,
+    boost: 4.0,
+  },
+  exposure: 0.6,
+  showShells: true,
+  showGround: true,
+  atmoSteps: 24,
+  cloudSteps: 32,
+  resScale: 0.75,
+  mode: 'freefly',
+};
+
+// ============================================================
+// WebGL setup
+// ============================================================
+const canvas = document.getElementById('canvas');
+const gl = canvas.getContext('webgl2', { antialias: false, alpha: false });
+if (!gl) {
+  document.body.innerHTML = '<div style="color:#fff;padding:32px;font-family:sans-serif">WebGL2 required.</div>';
+  throw new Error('no WebGL2');
+}
+
+function compile(type, src){
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)){
+    const log = gl.getShaderInfoLog(s);
+    console.error(log);
+    throw new Error('shader: '+log);
+  }
+  return s;
+}
+const vs = compile(gl.VERTEX_SHADER, document.getElementById('vertShader').textContent.trim());
+const fs = compile(gl.FRAGMENT_SHADER, document.getElementById('fragShader').textContent.trim());
+const prog = gl.createProgram();
+gl.attachShader(prog, vs); gl.attachShader(prog, fs);
+gl.bindAttribLocation(prog, 0, 'aPos');
+gl.linkProgram(prog);
+if (!gl.getProgramParameter(prog, gl.LINK_STATUS)){
+  console.error(gl.getProgramInfoLog(prog));
+  throw new Error('link');
+}
+gl.useProgram(prog);
+
+const quad = new Float32Array([-1,-1, 3,-1, -1,3]);
+const vbo = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+gl.bufferData(gl.ARRAY_BUFFER, quad, gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0);
+gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+const U = {};
+function getU(name){ if (!(name in U)) U[name] = gl.getUniformLocation(prog, name); return U[name]; }
+
+// ============================================================
+// Math helpers
+// ============================================================
+function mul4(a, b){
+  const r = new Float32Array(16);
+  for (let i=0;i<4;i++) for (let j=0;j<4;j++){
+    let s=0; for (let k=0;k<4;k++) s += a[i*4+k]*b[k*4+j];
+    r[i*4+j] = s;
+  }
+  return r;
+}
+function inv4(m){
+  const inv = new Float32Array(16);
+  inv[0]= m[5]*m[10]*m[15]-m[5]*m[11]*m[14]-m[9]*m[6]*m[15]+m[9]*m[7]*m[14]+m[13]*m[6]*m[11]-m[13]*m[7]*m[10];
+  inv[4]=-m[4]*m[10]*m[15]+m[4]*m[11]*m[14]+m[8]*m[6]*m[15]-m[8]*m[7]*m[14]-m[12]*m[6]*m[11]+m[12]*m[7]*m[10];
+  inv[8]= m[4]*m[9]*m[15]-m[4]*m[11]*m[13]-m[8]*m[5]*m[15]+m[8]*m[7]*m[13]+m[12]*m[5]*m[11]-m[12]*m[7]*m[9];
+  inv[12]=-m[4]*m[9]*m[14]+m[4]*m[10]*m[13]+m[8]*m[5]*m[14]-m[8]*m[6]*m[13]-m[12]*m[5]*m[10]+m[12]*m[6]*m[9];
+  inv[1]=-m[1]*m[10]*m[15]+m[1]*m[11]*m[14]+m[9]*m[2]*m[15]-m[9]*m[3]*m[14]-m[13]*m[2]*m[11]+m[13]*m[3]*m[10];
+  inv[5]= m[0]*m[10]*m[15]-m[0]*m[11]*m[14]-m[8]*m[2]*m[15]+m[8]*m[3]*m[14]+m[12]*m[2]*m[11]-m[12]*m[3]*m[10];
+  inv[9]=-m[0]*m[9]*m[15]+m[0]*m[11]*m[13]+m[8]*m[1]*m[15]-m[8]*m[3]*m[13]-m[12]*m[1]*m[11]+m[12]*m[3]*m[9];
+  inv[13]= m[0]*m[9]*m[14]-m[0]*m[10]*m[13]-m[8]*m[1]*m[14]+m[8]*m[2]*m[13]+m[12]*m[1]*m[10]-m[12]*m[2]*m[9];
+  inv[2]= m[1]*m[6]*m[15]-m[1]*m[7]*m[14]-m[5]*m[2]*m[15]+m[5]*m[3]*m[14]+m[13]*m[2]*m[7]-m[13]*m[3]*m[6];
+  inv[6]=-m[0]*m[6]*m[15]+m[0]*m[7]*m[14]+m[4]*m[2]*m[15]-m[4]*m[3]*m[14]-m[12]*m[2]*m[7]+m[12]*m[3]*m[6];
+  inv[10]= m[0]*m[5]*m[15]-m[0]*m[7]*m[13]-m[4]*m[1]*m[15]+m[4]*m[3]*m[13]+m[12]*m[1]*m[7]-m[12]*m[3]*m[5];
+  inv[14]=-m[0]*m[5]*m[14]+m[0]*m[6]*m[13]+m[4]*m[1]*m[14]-m[4]*m[2]*m[13]-m[12]*m[1]*m[6]+m[12]*m[2]*m[5];
+  inv[3]=-m[1]*m[6]*m[11]+m[1]*m[7]*m[10]+m[5]*m[2]*m[11]-m[5]*m[3]*m[10]-m[9]*m[2]*m[7]+m[9]*m[3]*m[6];
+  inv[7]= m[0]*m[6]*m[11]-m[0]*m[7]*m[10]-m[4]*m[2]*m[11]+m[4]*m[3]*m[10]+m[8]*m[2]*m[7]-m[8]*m[3]*m[6];
+  inv[11]=-m[0]*m[5]*m[11]+m[0]*m[7]*m[9]+m[4]*m[1]*m[11]-m[4]*m[3]*m[9]-m[8]*m[1]*m[7]+m[8]*m[3]*m[5];
+  inv[15]= m[0]*m[5]*m[10]-m[0]*m[6]*m[9]-m[4]*m[1]*m[10]+m[4]*m[2]*m[9]+m[8]*m[1]*m[6]-m[8]*m[2]*m[5];
+  let det = m[0]*inv[0]+m[1]*inv[4]+m[2]*inv[8]+m[3]*inv[12];
+  if (det === 0) return inv;
+  det = 1.0/det;
+  for (let i=0;i<16;i++) inv[i]*=det;
+  return inv;
+}
+function perspective(fov, aspect, near, far){
+  const f = 1.0/Math.tan(fov*0.5*Math.PI/180);
+  const nf = 1.0/(near - far);
+  return new Float32Array([
+    f/aspect, 0,0,0,
+    0,f,0,0,
+    0,0,(far+near)*nf,-1,
+    0,0,2*far*near*nf,0
+  ]);
+}
+function lookAt(eye, fwd, up){
+  const f = norm(fwd);
+  const s = norm(cross(f, up));
+  const u = cross(s, f);
+  return new Float32Array([
+    s[0], u[0], -f[0], 0,
+    s[1], u[1], -f[1], 0,
+    s[2], u[2], -f[2], 0,
+    -dot(s,eye), -dot(u,eye), dot(f,eye), 1
+  ]);
+}
+function norm(v){ const l=Math.hypot(v[0],v[1],v[2])||1; return [v[0]/l,v[1]/l,v[2]/l]; }
+function cross(a,b){ return [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]]; }
+function dot(a,b){ return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
+
+// ============================================================
+// Uniforms upload (per dome)
+// ============================================================
+function uploadDomes(){
+  const N = State.domes.length;
+  gl.uniform1i(getU('uDomeCount'), N);
+  const pos = new Float32Array(MAX_DOMES*4);
+  const sdi = new Float32Array(MAX_DOMES*4);
+  const sc  = new Float32Array(MAX_DOMES*4);
+  const aA  = new Float32Array(MAX_DOMES*4);
+  const aB  = new Float32Array(MAX_DOMES*4);
+  const at  = new Float32Array(MAX_DOMES*4);
+  const fg  = new Float32Array(MAX_DOMES*4);
+  const fgc = new Float32Array(MAX_DOMES*4);
+  const cl  = new Float32Array(MAX_DOMES*4);
+  const cl2 = new Float32Array(MAX_DOMES*4);
+  const wir = new Float32Array(MAX_DOMES*4);
+  for (let i=0;i<N;i++){
+    const d = State.domes[i];
+    pos.set([d.pos[0], d.pos[1], d.pos[2], d.radius], i*4);
+    const az = d.sunAz*Math.PI/180, el = d.sunEl*Math.PI/180;
+    const sx = Math.cos(el)*Math.cos(az);
+    const sy = Math.sin(el);
+    const sz = Math.cos(el)*Math.sin(az);
+    sdi.set([sx,sy,sz, d.sunIntensity], i*4);
+    const col = kelvinToRGB(d.sunTemp);
+    const angRad = d.sunSize * Math.PI/180 * 0.5;
+    sc.set([col[0]*d.tint[0], col[1]*d.tint[1], col[2]*d.tint[2], Math.cos(angRad)], i*4);
+    aA.set([d.rayleigh, d.mie, d.mieG, d.ozone], i*4);
+    aB.set([d.turbidity, d.groundAlb, 0, 0], i*4);
+    at.set([d.tint[0], d.tint[1], d.tint[2], 0], i*4);
+    fg.set([d.fogDensity, d.fogHeight, d.fogFalloff, d.fogG], i*4);
+    fgc.set([d.tint[0]*0.8, d.tint[1]*0.85, d.tint[2]*0.9, 1], i*4);
+    cl.set([d.cloudCoverage, d.cloudDensity, d.cloudAlt, d.cloudThickness], i*4);
+    cl2.set([d.cloudScale, d.cloudSpeed, d.cloudsOn ? 1 : 0, 0], i*4);
+    const hex = d.color.replace('#','');
+    const wr = parseInt(hex.substring(0,2),16)/255;
+    const wg = parseInt(hex.substring(2,4),16)/255;
+    const wb = parseInt(hex.substring(4,6),16)/255;
+    wir.set([wr, wg, wb, 1], i*4);
+  }
+  gl.uniform4fv(getU('uDomePos[0]'), pos);
+  gl.uniform4fv(getU('uSunDirInt[0]'), sdi);
+  gl.uniform4fv(getU('uSunColor[0]'), sc);
+  gl.uniform4fv(getU('uAtmoA[0]'), aA);
+  gl.uniform4fv(getU('uAtmoB[0]'), aB);
+  gl.uniform4fv(getU('uAtmoTint[0]'), at);
+  gl.uniform4fv(getU('uFog[0]'), fg);
+  gl.uniform4fv(getU('uFogColor[0]'), fgc);
+  gl.uniform4fv(getU('uCloud[0]'), cl);
+  gl.uniform4fv(getU('uCloud2[0]'), cl2);
+  gl.uniform4fv(getU('uDomeWire[0]'), wir);
+}
+
+// ============================================================
+// UI: slider factory
+// ============================================================
+function slider(parent, label, value, min, max, step, fmt, onChange){
+  parent.innerHTML = '';
+  const head = document.createElement('div'); head.className = 'es-row-inline';
+  const lab = document.createElement('span'); lab.className = 'es-label'; lab.textContent = label;
+  const val = document.createElement('span'); val.className = 'es-value';
+  head.appendChild(lab); head.appendChild(val);
+  const inp = document.createElement('input');
+  inp.type = 'range'; inp.className = 'es-slider';
+  inp.min = min; inp.max = max; inp.step = step; inp.value = value;
+  parent.appendChild(head); parent.appendChild(inp);
+  function update(){
+    val.textContent = fmt(parseFloat(inp.value));
+  }
+  inp.addEventListener('input', () => {
+    onChange(parseFloat(inp.value));
+    update();
+  });
+  update();
+  return {
+    set(v){ inp.value = v; update(); }
+  };
+}
+
+// ============================================================
+// Build UI
+// ============================================================
+const tabs = document.getElementById('tabs');
+tabs.querySelectorAll('.es-tab').forEach(b => {
+  b.addEventListener('click', () => {
+    tabs.querySelectorAll('.es-tab').forEach(x => x.classList.remove('is-active'));
+    b.classList.add('is-active');
+    document.querySelectorAll('.es-tab-content').forEach(c => c.classList.remove('is-active'));
+    document.querySelector('.es-tab-content[data-tab="'+b.dataset.tab+'"]').classList.add('is-active');
+  });
+});
+
+const domeListEl = document.getElementById('domeList');
+const teleportListEl = document.getElementById('teleportList');
+function teleportTo(i){
+  const d = State.domes[i];
+  State.camera.pos = [d.pos[0], 200, d.pos[2] - d.radius * 0.55];
+  State.camera.yaw = Math.PI * 0.5;
+  State.camera.pitch = 0.05;
+  State.selectedDome = i;
+  if (State.mode !== 'freefly') setMode('freefly');
+  renderDomeList();
+  refreshSelectedUI();
+}
+function renderDomeList(){
+  domeListEl.innerHTML = '';
+  teleportListEl.innerHTML = '';
+  State.domes.forEach((d, i) => {
+    const row = document.createElement('div');
+    row.className = 'es-dome-item' + (i === State.selectedDome ? ' is-active' : '');
+    const sw = document.createElement('div'); sw.className = 'es-dome-swatch'; sw.style.background = d.color;
+    const name = document.createElement('div'); name.className = 'es-dome-name'; name.textContent = d.name;
+    const meta = document.createElement('div'); meta.className = 'es-dome-meta'; meta.textContent = 'r='+(d.radius|0)+' · '+d.preset;
+    row.appendChild(sw); row.appendChild(name); row.appendChild(meta);
+    row.addEventListener('click', () => { State.selectedDome = i; renderDomeList(); refreshSelectedUI(); });
+    domeListEl.appendChild(row);
+
+    const tp = document.createElement('div');
+    tp.className = 'es-dome-item';
+    const tsw = document.createElement('div'); tsw.className = 'es-dome-swatch'; tsw.style.background = d.color;
+    const tname = document.createElement('div'); tname.className = 'es-dome-name'; tname.textContent = d.name;
+    const tmeta = document.createElement('div'); tmeta.className = 'es-dome-meta'; tmeta.textContent = '→ center';
+    tp.appendChild(tsw); tp.appendChild(tname); tp.appendChild(tmeta);
+    tp.addEventListener('click', () => teleportTo(i));
+    teleportListEl.appendChild(tp);
+  });
+}
+
+function fmtDeg(v){ return v.toFixed(1)+'°'; }
+function fmt2(v){ return v.toFixed(2); }
+function fmt3(v){ return v.toFixed(3); }
+function fmtInt(v){ return (v|0)+''; }
+function fmtKelv(v){ return (v|0)+'K'; }
+function fmtM(v){ return (v|0)+'m'; }
+function fmtPct(v){ return (v*100).toFixed(0)+'%'; }
+function fmtKm(v){ return (v/1000).toFixed(1)+'km'; }
+
+const sliders = {};
+
+function refreshSelectedUI(){
+  const d = State.domes[State.selectedDome];
+  if (!d) return;
+  // preset highlighter
+  document.querySelectorAll('#presetSeg .es-seg-btn').forEach(b => {
+    b.classList.toggle('is-active', b.dataset.preset === d.preset);
+  });
+  // dome
+  sliders.radius   = slider(document.getElementById('row-radius'), 'Dome radius', d.radius, 1000, 30000, 100, fmtKm, v => { d.radius = v; renderDomeList(); });
+  sliders.px = slider(document.getElementById('row-px'), 'Position X', d.pos[0], -50000, 50000, 100, v => (v|0)+'m', v => { d.pos[0] = v; });
+  sliders.py = slider(document.getElementById('row-py'), 'Position Y', d.pos[1], -10000, 10000, 50, v => (v|0)+'m', v => { d.pos[1] = v; });
+  sliders.pz = slider(document.getElementById('row-pz'), 'Position Z', d.pos[2], -50000, 50000, 100, v => (v|0)+'m', v => { d.pos[2] = v; });
+  // sun
+  sliders.sunAz   = slider(document.getElementById('row-sunAz'), 'Azimuth', d.sunAz, 0, 360, 1, fmtDeg, v => { d.sunAz = v; });
+  sliders.sunEl   = slider(document.getElementById('row-sunEl'), 'Elevation', d.sunEl, -15, 90, 0.5, fmtDeg, v => { d.sunEl = v; });
+  sliders.sunSize = slider(document.getElementById('row-sunSize'), 'Angular size', d.sunSize, 0.2, 4.0, 0.05, v => v.toFixed(2)+'°', v => { d.sunSize = v; });
+  sliders.sunIntensity = slider(document.getElementById('row-sunIntensity'), 'Intensity', d.sunIntensity, 0, 40, 0.5, fmt2, v => { d.sunIntensity = v; });
+  sliders.sunTemp = slider(document.getElementById('row-sunTemp'), 'Color temp', d.sunTemp, 1500, 12000, 50, fmtKelv, v => { d.sunTemp = v; });
+  // atmo
+  sliders.rayleigh = slider(document.getElementById('row-rayleigh'), 'Rayleigh', d.rayleigh, 0.0, 4.0, 0.05, fmt2, v => { d.rayleigh = v; });
+  sliders.mie      = slider(document.getElementById('row-mie'), 'Mie', d.mie, 0.0, 8.0, 0.05, fmt2, v => { d.mie = v; });
+  sliders.mieG     = slider(document.getElementById('row-mieG'), 'Mie anisotropy g', d.mieG, 0.0, 0.99, 0.01, fmt2, v => { d.mieG = v; });
+  sliders.ozone    = slider(document.getElementById('row-ozone'), 'Ozone', d.ozone, 0.0, 3.0, 0.05, fmt2, v => { d.ozone = v; });
+  sliders.turbidity= slider(document.getElementById('row-turbidity'), 'Turbidity', d.turbidity, 1.0, 10.0, 0.1, fmt2, v => { d.turbidity = v; });
+  sliders.groundAlb= slider(document.getElementById('row-groundAlb'), 'Ground albedo', d.groundAlb, 0.0, 1.0, 0.01, fmt2, v => { d.groundAlb = v; });
+  // fog
+  sliders.fogDensity = slider(document.getElementById('row-fogDensity'), 'Density', d.fogDensity, 0.0, 0.02, 0.0001, fmt3, v => { d.fogDensity = v; });
+  sliders.fogHeight  = slider(document.getElementById('row-fogHeight'),  'Height origin', d.fogHeight, -500, 3000, 10, fmtM, v => { d.fogHeight = v; });
+  sliders.fogFalloff = slider(document.getElementById('row-fogFalloff'), 'Falloff', d.fogFalloff, 50, 5000, 10, fmtM, v => { d.fogFalloff = v; });
+  sliders.fogG       = slider(document.getElementById('row-fogG'), 'Anisotropy g', d.fogG, -0.5, 0.9, 0.01, fmt2, v => { d.fogG = v; });
+  // clouds
+  sliders.cloudCoverage  = slider(document.getElementById('row-cloudCoverage'),  'Coverage', d.cloudCoverage, 0.0, 1.0, 0.01, fmtPct, v => { d.cloudCoverage = v; });
+  sliders.cloudDensity   = slider(document.getElementById('row-cloudDensity'),   'Density', d.cloudDensity, 0.0, 4.0, 0.05, fmt2, v => { d.cloudDensity = v; });
+  sliders.cloudAlt       = slider(document.getElementById('row-cloudAlt'),       'Base altitude', d.cloudAlt, 100, 5000, 50, fmtM, v => { d.cloudAlt = v; });
+  sliders.cloudThickness = slider(document.getElementById('row-cloudThickness'), 'Thickness', d.cloudThickness, 100, 4000, 50, fmtM, v => { d.cloudThickness = v; });
+  sliders.cloudScale     = slider(document.getElementById('row-cloudScale'),     'Detail scale', d.cloudScale, 0.2, 4.0, 0.05, fmt2, v => { d.cloudScale = v; });
+  sliders.cloudSpeed     = slider(document.getElementById('row-cloudSpeed'),     'Wind speed', d.cloudSpeed, 0.0, 2.0, 0.01, fmt2, v => { d.cloudSpeed = v; });
+
+  document.getElementById('cloudsToggle').classList.toggle('is-on', !!d.cloudsOn);
+}
+
+// preset segmented buttons
+document.querySelectorAll('#presetSeg .es-seg-btn').forEach(b => {
+  b.addEventListener('click', () => {
+    const d = State.domes[State.selectedDome];
+    const p = presetParams(b.dataset.preset);
+    d.preset = b.dataset.preset;
+    Object.assign(d, p);
+    renderDomeList(); refreshSelectedUI();
+  });
+});
+
+document.getElementById('addDome').addEventListener('click', () => {
+  if (State.domes.length >= MAX_DOMES) return;
+  const palette = ['#86c5ff','#ff9a5b','#a8b0bb','#9a8fff','#7be0a0','#ffd86b'];
+  const presets = ['clear','sunset','overcast','twilight','hazy','night'];
+  const n = State.domes.length;
+  const ang = (n * Math.PI*2 / 4) + Math.PI*0.25;
+  const d = makeDome(presets[n%6], 'Dome '+(n+1), palette[n%6], [Math.cos(ang)*13000, 0, Math.sin(ang)*13000], 5000);
+  State.domes.push(d);
+  State.selectedDome = n;
+  renderDomeList(); refreshSelectedUI();
+});
+document.getElementById('removeDome').addEventListener('click', () => {
+  if (State.domes.length <= 1) return;
+  State.domes.splice(State.selectedDome, 1);
+  State.selectedDome = Math.min(State.selectedDome, State.domes.length-1);
+  renderDomeList(); refreshSelectedUI();
+});
+
+// Camera tab
+slider(document.getElementById('row-fov'),     'FOV', State.camera.fov, 30, 110, 1, v => (v|0)+'°', v => { State.camera.fov = v; });
+slider(document.getElementById('row-exposure'),'Exposure', State.exposure, 0.05, 4.0, 0.05, fmt2, v => { State.exposure = v; });
+slider(document.getElementById('row-flySpeed'),'Fly speed', State.camera.speed, 100, 8000, 50, v => (v|0)+'/s', v => { State.camera.speed = v; });
+slider(document.getElementById('row-atmoSteps'),'Atmo steps', State.atmoSteps, 4, 64, 1, fmtInt, v => { State.atmoSteps = v|0; });
+slider(document.getElementById('row-cloudSteps'),'Cloud steps', State.cloudSteps, 8, 96, 1, fmtInt, v => { State.cloudSteps = v|0; });
+
+document.querySelectorAll('#resSeg .es-seg-btn').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('#resSeg .es-seg-btn').forEach(x => x.classList.remove('is-active'));
+    b.classList.add('is-active');
+    State.resScale = parseFloat(b.dataset.res);
+    resizeCanvas();
+  });
+});
+
+const shellToggle = document.getElementById('shellToggle');
+shellToggle.addEventListener('click', () => {
+  State.showShells = !State.showShells;
+  shellToggle.classList.toggle('is-on', State.showShells);
+});
+const groundToggle = document.getElementById('groundToggle');
+groundToggle.addEventListener('click', () => {
+  State.showGround = !State.showGround;
+  groundToggle.classList.toggle('is-on', State.showGround);
+});
+const cloudsToggle = document.getElementById('cloudsToggle');
+cloudsToggle.addEventListener('click', () => {
+  const d = State.domes[State.selectedDome];
+  d.cloudsOn = d.cloudsOn ? 0 : 1;
+  cloudsToggle.classList.toggle('is-on', !!d.cloudsOn);
+});
+
+document.getElementById('recenter').addEventListener('click', () => {
+  const d = State.domes[State.selectedDome];
+  State.camera.pos = [d.pos[0], d.pos[1] + d.radius*0.15, d.pos[2] - d.radius*0.6];
+  State.camera.yaw = 0; State.camera.pitch = 0;
+});
+document.getElementById('resetView').addEventListener('click', () => {
+  State.camera.pos = [0, 1500, -3500]; State.camera.yaw = 0; State.camera.pitch = -0.12;
+});
+
+// Bottom mode bar
+document.getElementById('btnFreefly').addEventListener('click', () => setMode('freefly'));
+document.getElementById('btnOrbit').addEventListener('click',   () => setMode('orbit'));
+document.getElementById('btnTour').addEventListener('click',    () => setMode('tour'));
+function setMode(m){
+  State.mode = m;
+  ['Freefly','Orbit','Tour'].forEach(n => {
+    document.getElementById('btn'+n).classList.toggle('is-active', n.toLowerCase() === m);
+  });
+}
+
+renderDomeList();
+refreshSelectedUI();
+
+// ============================================================
+// Camera controls
+// ============================================================
+const Keys = {};
+window.addEventListener('keydown', e => {
+  Keys[e.code] = true;
+  if (e.code.startsWith('Digit')){
+    const idx = parseInt(e.code.slice(5), 10) - 1;
+    if (idx >= 0 && idx < State.domes.length) teleportTo(idx);
+  }
+});
+window.addEventListener('keyup',   e => { Keys[e.code] = false; });
+
+let dragging = false;
+canvas.addEventListener('mousedown', e => {
+  if (e.button !== 0) return;
+  dragging = true;
+});
+window.addEventListener('mouseup', e => {
+  if (e.button !== 0) return;
+  dragging = false;
+});
+canvas.addEventListener('contextmenu', e => e.preventDefault());
+canvas.addEventListener('mousemove', e => {
+  if (!dragging) return;
+  const dx = e.movementX !== undefined ? e.movementX : 0;
+  const dy = e.movementY !== undefined ? e.movementY : 0;
+  const sens = 0.003;
+  State.camera.yaw   += dx * sens;
+  State.camera.pitch -= dy * sens;
+  const limit = Math.PI * 0.49;
+  if (State.camera.pitch >  limit) State.camera.pitch =  limit;
+  if (State.camera.pitch < -limit) State.camera.pitch = -limit;
+});
+canvas.addEventListener('wheel', e => {
+  State.camera.fov = Math.max(20, Math.min(110, State.camera.fov + e.deltaY*0.05));
+  e.preventDefault();
+}, { passive: false });
+
+// Orbit state
+let orbitAng = 0;
+let tourAng = 0;
+let tourT = 0;
+
+function updateCamera(dt){
+  const c = State.camera;
+  if (State.mode === 'freefly'){
+    // Horizontal-plane movement: WASD ignores pitch so you don't dive into the ground
+    const fwdH = [Math.cos(c.yaw), 0, Math.sin(c.yaw)];
+    const rightH = [Math.sin(c.yaw), 0, -Math.cos(c.yaw)];
+    let s = c.speed * (Keys['ShiftLeft']||Keys['ShiftRight'] ? c.boost : 1) * dt;
+    if (Keys['KeyW']) { c.pos[0]+=fwdH[0]*s;   c.pos[2]+=fwdH[2]*s; }
+    if (Keys['KeyS']) { c.pos[0]-=fwdH[0]*s;   c.pos[2]-=fwdH[2]*s; }
+    if (Keys['KeyD']) { c.pos[0]+=rightH[0]*s; c.pos[2]+=rightH[2]*s; }
+    if (Keys['KeyA']) { c.pos[0]-=rightH[0]*s; c.pos[2]-=rightH[2]*s; }
+    if (Keys['Space']) c.pos[1] += s;
+    if (Keys['ControlLeft']||Keys['ControlRight']) c.pos[1] -= s;
+    // Optional: Q/E for free-fly through pitch (full 3D forward)
+    if (Keys['KeyE']){
+      const fwd3 = [Math.cos(c.pitch)*Math.cos(c.yaw), Math.sin(c.pitch), Math.cos(c.pitch)*Math.sin(c.yaw)];
+      c.pos[0]+=fwd3[0]*s; c.pos[1]+=fwd3[1]*s; c.pos[2]+=fwd3[2]*s;
+    }
+    if (Keys['KeyQ']){
+      const fwd3 = [Math.cos(c.pitch)*Math.cos(c.yaw), Math.sin(c.pitch), Math.cos(c.pitch)*Math.sin(c.yaw)];
+      c.pos[0]-=fwd3[0]*s; c.pos[1]-=fwd3[1]*s; c.pos[2]-=fwd3[2]*s;
+    }
+  } else if (State.mode === 'orbit'){
+    const d = State.domes[State.selectedDome];
+    orbitAng += dt * 0.15;
+    const r = d.radius * 1.4;
+    c.pos = [d.pos[0] + Math.cos(orbitAng)*r, d.pos[1] + d.radius*0.25, d.pos[2] + Math.sin(orbitAng)*r];
+    const look = [d.pos[0]-c.pos[0], d.pos[1]-c.pos[1], d.pos[2]-c.pos[2]];
+    const l = Math.hypot(...look);
+    c.yaw = Math.atan2(look[2], look[0]);
+    c.pitch = Math.atan2(look[1], Math.hypot(look[0], look[2]));
+  } else if (State.mode === 'tour'){
+    tourT += dt * 0.18;
+    const N = State.domes.length;
+    const seg = Math.floor(tourT) % N;
+    const a = State.domes[seg];
+    const b = State.domes[(seg+1) % N];
+    const f = tourT - Math.floor(tourT);
+    const sm = f*f*(3-2*f);
+    c.pos = [
+      a.pos[0]*(1-sm) + b.pos[0]*sm,
+      Math.max(a.pos[1], b.pos[1]) + 800 + Math.sin(tourT*0.7)*400,
+      a.pos[2]*(1-sm) + b.pos[2]*sm
+    ];
+    const look = [b.pos[0]-c.pos[0], -200, b.pos[2]-c.pos[2]];
+    c.yaw = Math.atan2(look[2], look[0]);
+    c.pitch = Math.atan2(look[1], Math.hypot(look[0], look[2]));
+  }
+}
+
+// ============================================================
+// Resize
+// ============================================================
+function resizeCanvas(){
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+  const w = Math.floor(window.innerWidth  * dpr * State.resScale);
+  const h = Math.floor(window.innerHeight * dpr * State.resScale);
+  if (canvas.width !== w || canvas.height !== h){
+    canvas.width = w; canvas.height = h;
+  }
+  canvas.style.width = window.innerWidth+'px';
+  canvas.style.height = window.innerHeight+'px';
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+// ============================================================
+// Frame
+// ============================================================
+let lastTime = performance.now();
+let fpsAcc = 0, fpsCount = 0, fpsDisp = 0;
+const hudPos = document.getElementById('hudPos');
+const hudInside = document.getElementById('hudInside');
+const hudFps = document.getElementById('hudFps');
+
+function whichDome(p){
+  for (let i=0;i<State.domes.length;i++){
+    const d = State.domes[i];
+    const dx = p[0]-d.pos[0], dy = p[1]-d.pos[1], dz = p[2]-d.pos[2];
+    if (dx*dx + dy*dy + dz*dz < d.radius*d.radius) return i;
+  }
+  return -1;
+}
+
+function frame(now){
+  const dt = Math.min(0.1, (now - lastTime) * 0.001);
+  lastTime = now;
+
+  updateCamera(dt);
+  // FPS
+  fpsAcc += dt; fpsCount++;
+  if (fpsAcc > 0.5){
+    fpsDisp = fpsCount / fpsAcc;
+    fpsAcc = 0; fpsCount = 0;
+  }
+  const ins = whichDome(State.camera.pos);
+  hudPos.textContent = State.camera.pos.map(v => v.toFixed(0)).join(', ');
+  hudInside.textContent = ins >= 0 ? State.domes[ins].name : '— (void)';
+  hudFps.textContent = fpsDisp.toFixed(0)+' fps';
+
+  // build matrices
+  const aspect = canvas.width / canvas.height;
+  const proj = perspective(State.camera.fov, aspect, 1.0, 200000.0);
+  const c = State.camera;
+  const fwd = [Math.cos(c.pitch)*Math.cos(c.yaw), Math.sin(c.pitch), Math.cos(c.pitch)*Math.sin(c.yaw)];
+  const view = lookAt(c.pos, fwd, [0,1,0]);
+  const vp = mul4(proj, view);
+  const invVP = inv4(vp);
+
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.useProgram(prog);
+  gl.uniform2f(getU('uResolution'), canvas.width, canvas.height);
+  gl.uniform1f(getU('uTime'), now * 0.001);
+  gl.uniformMatrix4fv(getU('uInvViewProj'), false, invVP);
+  gl.uniform3f(getU('uCamPos'), c.pos[0], c.pos[1], c.pos[2]);
+  gl.uniform1f(getU('uExposure'), State.exposure);
+  gl.uniform1i(getU('uShowShells'), State.showShells ? 1 : 0);
+  gl.uniform1i(getU('uShowGround'), State.showGround ? 1 : 0);
+  gl.uniform1i(getU('uAtmoSteps'), State.atmoSteps);
+  gl.uniform1i(getU('uCloudSteps'), State.cloudSteps);
+  uploadDomes();
+
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

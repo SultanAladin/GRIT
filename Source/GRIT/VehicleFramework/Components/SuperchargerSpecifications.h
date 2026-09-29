@@ -97,11 +97,11 @@ struct FSuperchargerSpecifications
             
             BoostPressureCurve = {
                 FVector2D(2000.0f, 0.0f),           // [rev·min⁻¹, Bar]
-                FVector2D(5000.0f, 0.3f),           // [rev·min⁻¹, Bar]
-                FVector2D(10000.0f, 0.6f),          // [rev·min⁻¹, Bar]
-                FVector2D(15000.0f, 0.8f),          // [rev·min⁻¹, Bar]
-                FVector2D(20000.0f, 1.0f),          // [rev·min⁻¹, Bar]
-                FVector2D(25000.0f, 1.15f)          // [rev·min⁻¹, Bar]
+                FVector2D(5000.0f, 0.15f),          // [rev·min⁻¹, Bar]
+                FVector2D(10000.0f, 0.38f),         // [rev·min⁻¹, Bar]
+                FVector2D(15000.0f, 0.62f),         // [rev·min⁻¹, Bar]
+                FVector2D(20000.0f, 0.82f),         // [rev·min⁻¹, Bar]
+                FVector2D(24000.0f, 0.95f)          // [rev·min⁻¹, Bar]
             };
             
             TorqueMultiplierCurve = {
@@ -113,11 +113,11 @@ struct FSuperchargerSpecifications
             
             ParasiticDragCurve = {
                 FVector2D(2000.0f, 5.0f),           // [rev·min⁻¹, N·m]
-                FVector2D(5000.0f, 15.0f),          // [rev·min⁻¹, N·m]
-                FVector2D(10000.0f, 35.0f),         // [rev·min⁻¹, N·m]
-                FVector2D(15000.0f, 60.0f),         // [rev·min⁻¹, N·m]
-                FVector2D(20000.0f, 90.0f),         // [rev·min⁻¹, N·m]
-                FVector2D(25000.0f, 125.0f)         // [rev·min⁻¹, N·m]
+                FVector2D(5000.0f, 10.0f),          // [rev·min⁻¹, N·m]
+                FVector2D(10000.0f, 24.0f),         // [rev·min⁻¹, N·m]
+                FVector2D(15000.0f, 45.0f),         // [rev·min⁻¹, N·m]
+                FVector2D(20000.0f, 68.0f),         // [rev·min⁻¹, N·m]
+                FVector2D(24000.0f, 82.0f)          // [rev·min⁻¹, N·m]
             };
             
             TraceConfiguration();

@@ -97,13 +97,20 @@ private:
     //                          UTILITY
     //--------------------------------------------------------------------------
     bool EnsureRequiredComponentsExist();
-    float GetTraceDistance(UCameraComponent* Camera, FVector Direction, float MaxDistance);
-    float GetAdaptiveConeTrace(FVector Direction, float MaxDistance, float ConeAngleDeg,
-                               bool bTraceRight, bool bTraceLeft, bool bTraceUp, bool bTraceDown);
-    float RestrictZoomByDistance(float CurrentLength, float DesiredLength, float Distance);
-    void UpdateDistanceMeasurements();
     void InitializeCamera();
     bool CacheVehicleComponents();
+
+    //--------------------------------------------------------------------------
+    //                          COLLISION (Predictive Sphere Sweep)
+    //--------------------------------------------------------------------------
+    /** Compute world-space camera position for given orbit parameters */
+    FVector ComputeCameraWorldPosition(float Pitch, float Yaw, float ArmLen) const;
+
+    /** Sphere sweep from arm origin to proposed camera position. Returns true if path is clear. */
+    bool IsCameraPositionClear(const FVector& Origin, float Pitch, float Yaw, float ArmLen) const;
+
+    /** Overlap test at current camera position. Returns true if embedded in geometry. */
+    bool IsCameraOverlapping(const FVector& Origin, float Pitch, float Yaw, float ArmLen) const;
 
 public:
     //--------------------------------------------------------------------------
@@ -199,17 +206,8 @@ public:
     //--------------------------------------------------------------------------
     //                          COLLISION SETTINGS
     //--------------------------------------------------------------------------
-    UPROPERTY(EditAnywhere, Category = "Camera Settings|Collision")
-    float CollisionSafetyThreshold = 50.0f;               // [cm]
-
-    UPROPERTY(EditAnywhere, Category = "Camera Settings|Collision")
-    float ProximityMultiplier = 4.0f;
-
-    UPROPERTY(EditAnywhere, Category = "Camera Settings|Collision")
-    float ProximityBuffer = 30.0f;                        // [cm]
-
-    UPROPERTY(EditAnywhere, Category = "Camera Settings|Collision")
-    float TraceConeAngle = 15.0f;                         // [deg] - Spread angle for cone traces
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera Settings|Collision")
+    float CameraProbeRadius = 12.0f;                      // [cm] - Sphere sweep radius
 
     //--------------------------------------------------------------------------
     //                          ANCHOR TRANSITION SETTINGS

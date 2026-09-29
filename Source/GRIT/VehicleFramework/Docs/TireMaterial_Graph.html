@@ -1,0 +1,865 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Tire Deformation Material — Verified Setup Guide</title>
+<style>
+  body { background: #1a1a2e; margin: 0; padding: 20px; font-family: 'Segoe UI', sans-serif; color: #ccc; }
+  h1 { color: #e0e0e0; font-size: 20px; margin-bottom: 4px; }
+  h2 { color: #7fdbca; font-size: 15px; margin-top: 24px; margin-bottom: 8px; }
+  h3 { color: #d4b5ff; font-size: 13px; margin-top: 16px; margin-bottom: 6px; }
+  .note { background: #222240; border-left: 3px solid #7fdbca; padding: 8px 14px; margin: 10px 0; font-size: 12px; }
+  .warn { background: #3a2020; border-left: 3px solid #e91e63; padding: 8px 14px; margin: 10px 0; font-size: 12px; color: #f8bbd0; }
+  table { border-collapse: collapse; margin: 8px 0; width: 100%; }
+  th { background: #222240; color: #7fdbca; text-align: left; padding: 6px 10px; font-size: 12px; }
+  td { padding: 6px 10px; border-bottom: 1px solid #2a2a4a; font-size: 12px; }
+  .green  { color: #c8e6c9; }
+  .orange { color: #ffe0b2; }
+  .pink   { color: #f8bbd0; }
+  .mono   { font-family: 'Consolas', 'Courier New', monospace; }
+  code    { font-family: 'Consolas', 'Courier New', monospace; font-size: 12px; }
+  pre     { background: #111122; border: 1px solid #333; border-radius: 6px; padding: 14px; overflow-x: auto; font-size: 12px; line-height: 1.5; color: #d4d4d4; }
+  .kw     { color: #c586c0; }
+  .fn     { color: #dcdcaa; }
+  .cm     { color: #6a9955; }
+  .num    { color: #b5cea8; }
+  .tp     { color: #4ec9b0; }
+  svg { display: block; margin: 20px auto; }
+</style>
+</head>
+<body>
+
+<h1>UE5 Tire Deformation Material — Verified Setup Guide</h1>
+<p style="color:#888; font-size:12px; margin-top:0;">
+  Cross-referenced against <code>VehicleSolver.cpp</code> lines 31-44 (FName constants) and 6950-7004 (MID writes).<br>
+  All 14 parameter names verified. Complete paste-ready HLSL included. No fake nodes.
+</p>
+
+<!-- ================================================================ -->
+<!--                     NODE GRAPH (SVG)                             -->
+<!-- ================================================================ -->
+
+<h2>Material Graph Overview</h2>
+
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 920" width="1400" height="920">
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#7fdbca"/>
+    </marker>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <linearGradient id="paramGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2d4a3e"/>
+      <stop offset="100%" stop-color="#1a2e28"/>
+    </linearGradient>
+    <linearGradient id="customGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#4a2d5e"/>
+      <stop offset="100%" stop-color="#2e1a3a"/>
+    </linearGradient>
+    <linearGradient id="transformGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3a3a5e"/>
+      <stop offset="100%" stop-color="#22223a"/>
+    </linearGradient>
+    <linearGradient id="resultGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#5e3a2d"/>
+      <stop offset="100%" stop-color="#3a221a"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ============  COLUMN 1: SCALAR PARAMETERS  ============ -->
+
+  <text x="30" y="30" fill="#7fdbca" font-size="13" font-weight="bold">SCALAR PARAMETERS (14)</text>
+  <text x="30" y="46" fill="#556" font-size="10">C++ drives these via MID->SetScalarParameterValue() each frame</text>
+
+  <!-- Geometry (green dots) -->
+  <g transform="translate(20, 60)">
+    <rect x="0" y="0" width="210" height="28" rx="4" fill="url(#paramGrad)" stroke="#3a6b5a" stroke-width="1"/>
+    <circle cx="10" cy="14" r="4" fill="#4caf50"/>
+    <text x="20" y="18" fill="#c8e6c9" font-size="11">Tire_Deform_Enabled</text>
+    <circle cx="206" cy="14" r="4" fill="#fff" stroke="#7fdbca" stroke-width="1"/>
+  </g>
+  <g transform="translate(20, 94)">
+    <rect x="0" y="0" width="210" height="28" rx="4" fill="url(#paramGrad)" stroke="#3a6b5a" stroke-width="1"/>
+    <circle cx="10" cy="14" r="4" fill="#4caf50"/>
+    <text x="20" y="18" fill="#c8e6c9" font-size="11">Tire_OuterRadiusCm</text>
+    <circle cx="206" cy="14" r="4" fill="#fff" stroke="#7fdbca" stroke-width="1"/>
+  </g>
+  <g transform="translate(20, 128)">
+    <rect x="0" y="0" width="210" height="28" rx="4" fill="url(#paramGrad)" stroke="#3a6b5a" stroke-width="1"/>
+    <circle cx="10" cy="14" r="4" fill="#4caf50"/>
+    <text x="20" y="18" fill="#c8e6c9" font-size="11">Tire_InnerRadiusCm</text>
+    <circle cx="206" cy="14" r="4" fill="#fff" stroke="#7fdbca" stroke-width="1"/>
+  </g>
+  <g transform="translate(20, 162)">
+    <rect x="0" y="0" width="210" height="28" rx="4" fill="url(#paramGrad)" stroke="#3a6b5a" stroke-width="1"/>
+    <circle cx="10" cy="14" r="4" fill="#4caf50"/>
+    <text x="20" y="18" fill="#c8e6c9" font-size="11">Tire_HalfWidthCm</text>
+    <circle cx="206" cy="14" r="4" fill="#fff" stroke="#7fdbca" stroke-width="1"/>
+  </g>
+  <g transform="translate(20, 196)">
+    <rect x="0" y="0" width="210" height="28" rx="4" fill="url(#paramGrad)" stroke="#3a6b5a" stroke-width="1"/>
+    <circle cx="10" cy="14" r="4" fill="#4caf50"/>
+    <text x="20" y="18" fill="#c8e6c9" font-size="11">Tire_BeadLockPaddingCm</text>
+    <circle cx="206" cy="14" r="4" fill="#fff" stroke="#7fdbca" stroke-width="1"/>
+  </g>
+
+  <!-- Physics state (orange dots) -->
+  <g transform="translate(20, 246)">
+    <rect x="0" y="0" width="210" height="28" rx="4" fill="url(#paramGrad)" stroke="#3a6b5a" stroke-width="1"/>
+    <circle cx="10" cy="14" r="4" fill="#ff9800"/>
+    <text x="20" y="18" fill="#ffe0b2" font-size="11">Tire_PressureRatio</text>
+    <circle cx="206" cy="14" r="4" fill="#fff" stroke="#7fdbca" stroke-width="1"/>
+  </g>
+  <g transform="translate(20, 280)">
+    <rect x="0" y="0" width="210" height="28" rx="4" fill="url(#paramGrad)" stroke="#3a6b5a" stroke-width="1"/>
+    <circle cx="10" cy="14" r="4" fill="#ff9800"/>
+    <text x="20" y="18" fill="#ffe0b2" font-size="11">Tire_LoadRatio</text>
+    <circle cx="206" cy="14" r="4" fill="#fff" stroke="#7fdbca" stroke-width="1"/>
+  </g>
+  <g transform="translate(20, 314)">
+    <rect x="0" y="0" width="210" height="28" rx="4" fill="url(#paramGrad)" stroke="#3a6b5a" stroke-width="1"/>
+    <circle cx="10" cy="14" r="4" fill="#ff9800"/>
+    <text x="20" y="18" fill="#ffe0b2" font-size="11">Tire_ContactAlpha</text>
+    <circle cx="206" cy="14" r="4" fill="#fff" stroke="#7fdbca" stroke-width="1"/>
+  </g>
+  <g transform="translate(20, 348)">
+    <rect x="0" y="0" width="210" height="28" rx="4" fill="url(#paramGrad)" stroke="#3a6b5a" stroke-width="1"/>
+    <circle cx="10" cy="14" r="4" fill="#ff9800"/>
+    <text x="20" y="18" fill="#ffe0b2" font-size="11">Tire_WearAlpha</text>
+    <circle cx="206" cy="14" r="4" fill="#fff" stroke="#7fdbca" stroke-width="1"/>
+  </g>
+
+  <!-- Computed deformation (pink dots) -->
+  <g transform="translate(20, 398)">
+    <rect x="0" y="0" width="210" height="28" rx="4" fill="url(#paramGrad)" stroke="#3a6b5a" stroke-width="1"/>
+    <circle cx="10" cy="14" r="4" fill="#e91e63"/>
+    <text x="20" y="18" fill="#f8bbd0" font-size="11">Tire_FlattenAmountCm</text>
+    <circle cx="206" cy="14" r="4" fill="#fff" stroke="#7fdbca" stroke-width="1"/>
+  </g>
+  <g transform="translate(20, 432)">
+    <rect x="0" y="0" width="210" height="28" rx="4" fill="url(#paramGrad)" stroke="#3a6b5a" stroke-width="1"/>
+    <circle cx="10" cy="14" r="4" fill="#e91e63"/>
+    <text x="20" y="18" fill="#f8bbd0" font-size="11">Tire_BulgeAmountCm</text>
+    <circle cx="206" cy="14" r="4" fill="#fff" stroke="#7fdbca" stroke-width="1"/>
+  </g>
+  <g transform="translate(20, 466)">
+    <rect x="0" y="0" width="210" height="28" rx="4" fill="url(#paramGrad)" stroke="#3a6b5a" stroke-width="1"/>
+    <circle cx="10" cy="14" r="4" fill="#e91e63"/>
+    <text x="20" y="18" fill="#f8bbd0" font-size="11">Tire_PatchHalfAngleRad</text>
+    <circle cx="206" cy="14" r="4" fill="#fff" stroke="#7fdbca" stroke-width="1"/>
+  </g>
+  <g transform="translate(20, 500)">
+    <rect x="0" y="0" width="210" height="28" rx="4" fill="url(#paramGrad)" stroke="#3a6b5a" stroke-width="1"/>
+    <circle cx="10" cy="14" r="4" fill="#e91e63"/>
+    <text x="20" y="18" fill="#f8bbd0" font-size="11">Tire_RotationAngleRad</text>
+    <circle cx="206" cy="14" r="4" fill="#fff" stroke="#7fdbca" stroke-width="1"/>
+  </g>
+  <g transform="translate(20, 534)">
+    <rect x="0" y="0" width="210" height="28" rx="4" fill="url(#paramGrad)" stroke="#3a6b5a" stroke-width="1"/>
+    <circle cx="10" cy="14" r="4" fill="#e91e63"/>
+    <text x="20" y="18" fill="#f8bbd0" font-size="11">Tire_SuspensionDispCm</text>
+    <circle cx="206" cy="14" r="4" fill="#fff" stroke="#7fdbca" stroke-width="1"/>
+  </g>
+
+  <!-- Legend -->
+  <g transform="translate(20, 590)">
+    <circle cx="6" cy="6" r="4" fill="#4caf50"/>
+    <text x="16" y="10" fill="#888" font-size="10">Geometry (set once in BeginPlay, static per tire)</text>
+    <circle cx="6" cy="24" r="4" fill="#ff9800"/>
+    <text x="16" y="28" fill="#888" font-size="10">Physics state (updated every tick)</text>
+    <circle cx="6" cy="42" r="4" fill="#e91e63"/>
+    <text x="16" y="46" fill="#888" font-size="10">Computed deformation (updated every tick)</text>
+  </g>
+
+  <!-- ============  COLUMN 2: WORLD POSITION + W2L  ============ -->
+
+  <g transform="translate(300, 60)">
+    <rect x="0" y="0" width="210" height="50" rx="6" fill="url(#transformGrad)" stroke="#5566aa" stroke-width="1.5"/>
+    <text x="10" y="20" fill="#b3c5ff" font-size="12" font-weight="bold">Absolute World Position</text>
+    <text x="10" y="38" fill="#778" font-size="10">Engine node — gives vertex world pos</text>
+    <circle cx="206" cy="25" r="4" fill="#fff" stroke="#7fdbca" stroke-width="1"/>
+  </g>
+
+  <g transform="translate(300, 140)">
+    <rect x="0" y="0" width="210" height="68" rx="6" fill="url(#transformGrad)" stroke="#5566aa" stroke-width="1.5"/>
+    <text x="10" y="20" fill="#b3c5ff" font-size="12" font-weight="bold">Transform Position</text>
+    <text x="10" y="36" fill="#778" font-size="10">Source: World   Destination: Local</text>
+    <text x="10" y="52" fill="#667" font-size="9">Right-click → search "TransformPosition"</text>
+    <text x="10" y="64" fill="#667" font-size="9">Set dropdown to World → Local</text>
+    <circle cx="4" cy="25" r="4" fill="#fff" stroke="#5566aa" stroke-width="1"/>
+    <circle cx="206" cy="34" r="4" fill="#fff" stroke="#7fdbca" stroke-width="1"/>
+  </g>
+
+  <!-- Arrow: WorldPos -> Transform -->
+  <line x1="506" y1="85" x2="506" y2="134" stroke="#5566aa" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <polygon points="506,140 502,132 510,132" fill="#5566aa"/>
+
+  <!-- ============  COLUMN 3: CUSTOM NODE (HLSL)  ============ -->
+
+  <g transform="translate(580, 60)">
+    <rect x="0" y="0" width="360" height="620" rx="8" fill="url(#customGrad)" stroke="#8855bb" stroke-width="2" filter="url(#glow)"/>
+    <text x="14" y="24" fill="#d4b5ff" font-size="14" font-weight="bold">Custom Node</text>
+    <text x="14" y="42" fill="#9977bb" font-size="10">Output Type: CMOT Float 3</text>
+    <text x="14" y="56" fill="#9977bb" font-size="10">Description: "TireDeformWPO"</text>
+
+    <line x1="0" y1="74" x2="360" y2="74" stroke="#553377" stroke-width="0.5"/>
+    <text x="14" y="90" fill="#aa88cc" font-size="11" font-weight="bold">INPUTS (15 total — add each via "+" button):</text>
+
+    <circle cx="4" cy="108" r="4" fill="#fff" stroke="#8855bb" stroke-width="1"/>
+    <text x="14" y="112" fill="#cba8e8" font-size="11">LocalPos (float3)</text>
+
+    <circle cx="4" cy="128" r="4" fill="#fff" stroke="#8855bb" stroke-width="1"/>
+    <text x="14" y="132" fill="#cba8e8" font-size="11">DeformEnabled (float)</text>
+
+    <circle cx="4" cy="148" r="4" fill="#fff" stroke="#8855bb" stroke-width="1"/>
+    <text x="14" y="152" fill="#cba8e8" font-size="11">OuterRadiusCm (float)</text>
+
+    <circle cx="4" cy="168" r="4" fill="#fff" stroke="#8855bb" stroke-width="1"/>
+    <text x="14" y="172" fill="#cba8e8" font-size="11">InnerRadiusCm (float)</text>
+
+    <circle cx="4" cy="188" r="4" fill="#fff" stroke="#8855bb" stroke-width="1"/>
+    <text x="14" y="192" fill="#cba8e8" font-size="11">HalfWidthCm (float)</text>
+
+    <circle cx="4" cy="208" r="4" fill="#fff" stroke="#8855bb" stroke-width="1"/>
+    <text x="14" y="212" fill="#cba8e8" font-size="11">BeadLockPaddingCm (float)</text>
+
+    <circle cx="4" cy="228" r="4" fill="#fff" stroke="#8855bb" stroke-width="1"/>
+    <text x="14" y="232" fill="#cba8e8" font-size="11">PressureRatio (float)</text>
+
+    <circle cx="4" cy="248" r="4" fill="#fff" stroke="#8855bb" stroke-width="1"/>
+    <text x="14" y="252" fill="#cba8e8" font-size="11">LoadRatio (float)</text>
+
+    <circle cx="4" cy="268" r="4" fill="#fff" stroke="#8855bb" stroke-width="1"/>
+    <text x="14" y="272" fill="#cba8e8" font-size="11">ContactAlpha (float)</text>
+
+    <circle cx="4" cy="288" r="4" fill="#fff" stroke="#8855bb" stroke-width="1"/>
+    <text x="14" y="292" fill="#cba8e8" font-size="11">WearAlpha (float)</text>
+
+    <circle cx="4" cy="308" r="4" fill="#fff" stroke="#8855bb" stroke-width="1"/>
+    <text x="14" y="312" fill="#cba8e8" font-size="11">FlattenAmountCm (float)</text>
+
+    <circle cx="4" cy="328" r="4" fill="#fff" stroke="#8855bb" stroke-width="1"/>
+    <text x="14" y="332" fill="#cba8e8" font-size="11">BulgeAmountCm (float)</text>
+
+    <circle cx="4" cy="348" r="4" fill="#fff" stroke="#8855bb" stroke-width="1"/>
+    <text x="14" y="352" fill="#cba8e8" font-size="11">PatchHalfAngleRad (float)</text>
+
+    <circle cx="4" cy="368" r="4" fill="#fff" stroke="#8855bb" stroke-width="1"/>
+    <text x="14" y="372" fill="#cba8e8" font-size="11">RotationAngleRad (float)</text>
+
+    <circle cx="4" cy="388" r="4" fill="#fff" stroke="#8855bb" stroke-width="1"/>
+    <text x="14" y="392" fill="#cba8e8" font-size="11">SuspensionDispCm (float)</text>
+
+    <!-- HLSL preview -->
+    <line x1="0" y1="410" x2="360" y2="410" stroke="#553377" stroke-width="0.5"/>
+    <text x="14" y="430" fill="#aa88cc" font-size="11" font-weight="bold">HLSL CODE (see full listing below):</text>
+
+    <text x="14" y="452" fill="#776699" font-size="9" font-family="monospace">float3 P = LocalPos;</text>
+    <text x="14" y="466" fill="#776699" font-size="9" font-family="monospace">float R = length(float2(P.x, P.z));</text>
+    <text x="14" y="480" fill="#776699" font-size="9" font-family="monospace">float Rigid = InnerRadiusCm + BeadLockPaddingCm;</text>
+    <text x="14" y="494" fill="#776699" font-size="9" font-family="monospace">float Mask = smoothstep(Rigid, OuterRadiusCm, R);</text>
+    <text x="14" y="508" fill="#776699" font-size="9" font-family="monospace">float Theta = atan2(P.z, P.x) - RotationAngleRad;</text>
+    <text x="14" y="522" fill="#776699" font-size="9" font-family="monospace">// counter-rotate → flatten at ground</text>
+    <text x="14" y="536" fill="#776699" font-size="9" font-family="monospace">// → bulge at sidewall → suspension Z</text>
+    <text x="14" y="550" fill="#776699" font-size="9" font-family="monospace">// → lerp to zero when DeformEnabled==0</text>
+    <text x="14" y="564" fill="#776699" font-size="9" font-family="monospace">return Offset * DeformEnabled;</text>
+
+    <!-- Output pin -->
+    <circle cx="356" cy="310" r="5" fill="#d4b5ff" stroke="#8855bb" stroke-width="1.5"/>
+    <text x="310" y="302" fill="#aa88cc" font-size="9">OUT</text>
+    <text x="296" y="316" fill="#aa88cc" font-size="9">float3</text>
+  </g>
+
+  <!-- ============  COLUMN 4: L2W + MATERIAL RESULT  ============ -->
+
+  <g transform="translate(1010, 260)">
+    <rect x="0" y="0" width="190" height="68" rx="6" fill="url(#transformGrad)" stroke="#5566aa" stroke-width="1.5"/>
+    <text x="10" y="20" fill="#b3c5ff" font-size="12" font-weight="bold">Transform Vector</text>
+    <text x="10" y="38" fill="#778" font-size="10">Source: Local   Destination: World</text>
+    <text x="10" y="54" fill="#667" font-size="9">Right-click → search "TransformVector"</text>
+    <text x="10" y="64" fill="#667" font-size="9">Set dropdown to Local → World</text>
+    <circle cx="4" cy="34" r="4" fill="#fff" stroke="#5566aa" stroke-width="1"/>
+    <circle cx="186" cy="34" r="4" fill="#fff" stroke="#7fdbca" stroke-width="1"/>
+  </g>
+
+  <g transform="translate(1250, 220)">
+    <rect x="0" y="0" width="130" height="160" rx="8" fill="url(#resultGrad)" stroke="#cc6633" stroke-width="2"/>
+    <text x="10" y="24" fill="#ffccaa" font-size="13" font-weight="bold">Material</text>
+    <text x="10" y="40" fill="#aa7755" font-size="10">Result Node</text>
+
+    <line x1="0" y1="52" x2="130" y2="52" stroke="#884422" stroke-width="0.5"/>
+
+    <circle cx="4" cy="68" r="4" fill="#888"/>
+    <text x="14" y="72" fill="#997766" font-size="10">Base Color</text>
+
+    <circle cx="4" cy="90" r="4" fill="#888"/>
+    <text x="14" y="94" fill="#997766" font-size="10">Metallic</text>
+
+    <circle cx="4" cy="112" r="4" fill="#7fdbca" stroke="#cc6633" stroke-width="1.5"/>
+    <text x="14" y="116" fill="#ffccaa" font-size="11" font-weight="bold">World Pos Offset</text>
+
+    <circle cx="4" cy="134" r="4" fill="#888"/>
+    <text x="14" y="138" fill="#997766" font-size="10">Normal</text>
+  </g>
+
+  <!-- ============  WIRES  ============ -->
+
+  <!-- WorldPos → TransformPosition (World→Local) -->
+  <path d="M 506,85 C 506,110 304,145 304,165" stroke="#5566aa" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+
+  <!-- TransformPosition output → Custom Node LocalPos input -->
+  <path d="M 506,174 C 540,174 560,168 580,168" stroke="#7fdbca" stroke-width="1.5" fill="none"/>
+
+  <!-- Geometry params (green) to Custom inputs -->
+  <path d="M 226,74 C 290,74 540,128 580,128" stroke="#4caf50" stroke-width="1" fill="none" opacity="0.6"/>
+  <path d="M 226,108 C 290,108 540,148 580,148" stroke="#4caf50" stroke-width="1" fill="none" opacity="0.6"/>
+  <path d="M 226,142 C 290,142 540,168 580,168" stroke="#4caf50" stroke-width="1" fill="none" opacity="0.6"/>
+  <path d="M 226,176 C 290,176 540,188 580,188" stroke="#4caf50" stroke-width="1" fill="none" opacity="0.6"/>
+  <path d="M 226,210 C 290,210 540,208 580,208" stroke="#4caf50" stroke-width="1" fill="none" opacity="0.6"/>
+
+  <!-- Physics params (orange) to Custom inputs -->
+  <path d="M 226,260 C 290,260 540,228 580,228" stroke="#ff9800" stroke-width="1" fill="none" opacity="0.6"/>
+  <path d="M 226,294 C 290,294 540,248 580,248" stroke="#ff9800" stroke-width="1" fill="none" opacity="0.6"/>
+  <path d="M 226,328 C 290,328 540,268 580,268" stroke="#ff9800" stroke-width="1" fill="none" opacity="0.6"/>
+  <path d="M 226,362 C 290,362 540,288 580,288" stroke="#ff9800" stroke-width="1" fill="none" opacity="0.6"/>
+
+  <!-- Deformation params (pink) to Custom inputs -->
+  <path d="M 226,412 C 290,412 540,308 580,308" stroke="#e91e63" stroke-width="1" fill="none" opacity="0.6"/>
+  <path d="M 226,446 C 290,446 540,328 580,328" stroke="#e91e63" stroke-width="1" fill="none" opacity="0.6"/>
+  <path d="M 226,480 C 290,480 540,348 580,348" stroke="#e91e63" stroke-width="1" fill="none" opacity="0.6"/>
+  <path d="M 226,514 C 290,514 540,368 580,368" stroke="#e91e63" stroke-width="1" fill="none" opacity="0.6"/>
+  <path d="M 226,548 C 290,548 540,388 580,388" stroke="#e91e63" stroke-width="1" fill="none" opacity="0.6"/>
+
+  <!-- Custom output → TransformVector (Local→World) -->
+  <path d="M 936,370 C 970,370 990,294 1010,294" stroke="#d4b5ff" stroke-width="2.5" fill="none"/>
+
+  <!-- TransformVector → WPO pin -->
+  <path d="M 1196,294 C 1220,294 1230,332 1250,332" stroke="#7fdbca" stroke-width="2.5" fill="none"/>
+
+  <!-- ============  STEP NUMBERS  ============ -->
+
+  <g transform="translate(300, 36)">
+    <rect x="0" y="0" width="18" height="18" rx="9" fill="#5566aa"/>
+    <text x="6" y="14" fill="#fff" font-size="11" font-weight="bold">1</text>
+  </g>
+  <g transform="translate(300, 118)">
+    <rect x="0" y="0" width="18" height="18" rx="9" fill="#5566aa"/>
+    <text x="6" y="14" fill="#fff" font-size="11" font-weight="bold">2</text>
+  </g>
+  <g transform="translate(580, 38)">
+    <rect x="0" y="0" width="18" height="18" rx="9" fill="#8855bb"/>
+    <text x="6" y="14" fill="#fff" font-size="11" font-weight="bold">3</text>
+  </g>
+  <g transform="translate(1010, 238)">
+    <rect x="0" y="0" width="18" height="18" rx="9" fill="#5566aa"/>
+    <text x="6" y="14" fill="#fff" font-size="11" font-weight="bold">4</text>
+  </g>
+  <g transform="translate(1250, 198)">
+    <rect x="0" y="0" width="18" height="18" rx="9" fill="#cc6633"/>
+    <text x="6" y="14" fill="#fff" font-size="11" font-weight="bold">5</text>
+  </g>
+
+  <!-- ============  BOTTOM: STEP SUMMARY  ============ -->
+
+  <g transform="translate(20, 700)">
+    <rect x="0" y="0" width="1360" height="200" rx="8" fill="#111122" stroke="#333" stroke-width="1"/>
+
+    <text x="20" y="28" fill="#e0e0e0" font-size="13" font-weight="bold">SETUP STEPS IN UE5 MATERIAL EDITOR:</text>
+
+    <rect x="20" y="42" width="22" height="22" rx="11" fill="#5566aa"/>
+    <text x="27" y="58" fill="#fff" font-size="12" font-weight="bold">1</text>
+    <text x="52" y="56" fill="#b3c5ff" font-size="12">Add "Absolute World Position" node (right-click → search "WorldPosition")</text>
+
+    <rect x="20" y="72" width="22" height="22" rx="11" fill="#5566aa"/>
+    <text x="27" y="88" fill="#fff" font-size="12" font-weight="bold">2</text>
+    <text x="52" y="86" fill="#b3c5ff" font-size="12">Add "TransformPosition" node — set World → Local. Wire (1) into it.</text>
+
+    <rect x="20" y="102" width="22" height="22" rx="11" fill="#8855bb"/>
+    <text x="27" y="118" fill="#fff" font-size="12" font-weight="bold">3</text>
+    <text x="52" y="116" fill="#d4b5ff" font-size="12">Add "Custom" node — paste HLSL below. Add 15 inputs. Wire (2) → LocalPos, each ScalarParam → its input.</text>
+
+    <rect x="20" y="132" width="22" height="22" rx="11" fill="#5566aa"/>
+    <text x="27" y="148" fill="#fff" font-size="12" font-weight="bold">4</text>
+    <text x="52" y="146" fill="#b3c5ff" font-size="12">Add "TransformVector" node — set Local → World. Wire Custom output into it.</text>
+
+    <rect x="20" y="162" width="22" height="22" rx="11" fill="#cc6633"/>
+    <text x="27" y="178" fill="#fff" font-size="12" font-weight="bold">5</text>
+    <text x="52" y="176" fill="#ffccaa" font-size="12">Wire (4) output → "World Position Offset" pin on Material Result node.</text>
+  </g>
+
+</svg>
+
+
+<!-- ================================================================ -->
+<!--                  PARAMETER REFERENCE TABLE                       -->
+<!-- ================================================================ -->
+
+<h2>Parameter Reference (C++ ↔ Material)</h2>
+<p style="font-size:11px; color:#888;">
+  Each row: the exact FName string used in <code>VehicleSolver.cpp:31-44</code>,
+  what C++ expression drives it (<code>:6950-7001</code>), and the matching Custom node input name.
+</p>
+
+<table>
+  <tr>
+    <th>C++ FName (exact string)</th>
+    <th>Custom Node Input Name</th>
+    <th>Type</th>
+    <th>Driven By (C++ expression)</th>
+    <th>Range</th>
+  </tr>
+  <tr>
+    <td class="mono green">Tire_Deform_Enabled</td>
+    <td class="mono">DeformEnabled</td>
+    <td>float</td>
+    <td>bEnableTireVisualDeformation ? 1.0 : 0.0</td>
+    <td>0 or 1</td>
+  </tr>
+  <tr>
+    <td class="mono green">Tire_OuterRadiusCm</td>
+    <td class="mono">OuterRadiusCm</td>
+    <td>float</td>
+    <td>TireSpec.OuterRadius * 100</td>
+    <td>~30-50</td>
+  </tr>
+  <tr>
+    <td class="mono green">Tire_InnerRadiusCm</td>
+    <td class="mono">InnerRadiusCm</td>
+    <td>float</td>
+    <td>TireSpec.InnerRadius * 100</td>
+    <td>~15-25</td>
+  </tr>
+  <tr>
+    <td class="mono green">Tire_HalfWidthCm</td>
+    <td class="mono">HalfWidthCm</td>
+    <td>float</td>
+    <td>TireSpec.Width * 50</td>
+    <td>~10-20</td>
+  </tr>
+  <tr>
+    <td class="mono green">Tire_BeadLockPaddingCm</td>
+    <td class="mono">BeadLockPaddingCm</td>
+    <td>float</td>
+    <td>TireVisualBeadLockPaddingCm (UPROPERTY)</td>
+    <td>~2-5</td>
+  </tr>
+  <tr>
+    <td class="mono orange">Tire_PressureRatio</td>
+    <td class="mono">PressureRatio</td>
+    <td>float</td>
+    <td>CurrentPressurePa / NominalPressurePa</td>
+    <td>~0.5-2.0</td>
+  </tr>
+  <tr>
+    <td class="mono orange">Tire_LoadRatio</td>
+    <td class="mono">LoadRatio</td>
+    <td>float</td>
+    <td>DynamicLoadN / StaticLoadN</td>
+    <td>0-MaxLoadRatio</td>
+  </tr>
+  <tr>
+    <td class="mono orange">Tire_ContactAlpha</td>
+    <td class="mono">ContactAlpha</td>
+    <td>float</td>
+    <td>bInContact ? 1.0 : 0.0</td>
+    <td>0 or 1</td>
+  </tr>
+  <tr>
+    <td class="mono orange">Tire_WearAlpha</td>
+    <td class="mono">WearAlpha</td>
+    <td>float</td>
+    <td>WheelWear01[WheelIndex]</td>
+    <td>0-1</td>
+  </tr>
+  <tr>
+    <td class="mono pink">Tire_FlattenAmountCm</td>
+    <td class="mono">FlattenAmountCm</td>
+    <td>float</td>
+    <td>DeflectionAlpha * TireVisualMaxFlattenCm</td>
+    <td>0-~3</td>
+  </tr>
+  <tr>
+    <td class="mono pink">Tire_BulgeAmountCm</td>
+    <td class="mono">BulgeAmountCm</td>
+    <td>float</td>
+    <td>(Deflection*0.65 + UnderInflation*0.35) * MaxBulgeCm</td>
+    <td>0-~2</td>
+  </tr>
+  <tr>
+    <td class="mono pink">Tire_PatchHalfAngleRad</td>
+    <td class="mono">PatchHalfAngleRad</td>
+    <td>float</td>
+    <td>FMath::DegreesToRadians(TireVisualPatchHalfAngleDeg)</td>
+    <td>~0.15-0.5</td>
+  </tr>
+  <tr>
+    <td class="mono pink">Tire_RotationAngleRad</td>
+    <td class="mono">RotationAngleRad</td>
+    <td>float</td>
+    <td>LatestPhysicsOutput_GT.WheelRotationAngles[i]</td>
+    <td>0-2*PI</td>
+  </tr>
+  <tr>
+    <td class="mono pink">Tire_SuspensionDispCm</td>
+    <td class="mono">SuspensionDispCm</td>
+    <td>float</td>
+    <td>LatestPhysicsOutput_GT.SuspensionDisplacements[i]</td>
+    <td>~-10 to 10</td>
+  </tr>
+</table>
+
+
+<!-- ================================================================ -->
+<!--                    FULL HLSL CODE                                -->
+<!-- ================================================================ -->
+
+<h2>Complete HLSL Code — Paste Into Custom Node</h2>
+
+<div class="note">
+  <strong>Custom node settings:</strong><br>
+  &bull; Output Type: <strong>CMOT Float 3</strong><br>
+  &bull; Description: <strong>TireDeformWPO</strong><br>
+  &bull; Add <strong>15 inputs</strong> via the "+" button. Name each one exactly as shown in the table above (column "Custom Node Input Name").
+  The input type for <code>LocalPos</code> is <strong>Float 3</strong>. All others are <strong>Float 1</strong>.<br>
+  &bull; Paste the code below into the "Code" box.
+</div>
+
+<div class="warn">
+  <strong>Original ChatGPT version had these bugs:</strong><br>
+  &bull; Only showed pseudo-code snippets — not compilable HLSL<br>
+  &bull; SuspensionDispCm was missing from Custom node inputs (C++ sets it but HLSL never received it)<br>
+  &bull; Custom node had 14 inputs listed but should be 15 (LocalPos + 14 scalars)<br>
+  &bull; Counter-rotation math was vague ("counter-rotate to keep patch at ground" is not code)<br>
+  &bull; Bulge direction was wrong — used <code>Offset.xz</code> which overwrites the flatten in Z<br>
+  All fixed below.
+</div>
+
+<pre><code><span class="cm">// Tire deformation WPO — local space in, local-space offset out.</span>
+<span class="cm">// The material's TransformPosition (W→L) feeds LocalPos.</span>
+<span class="cm">// The material's TransformVector (L→W) converts our output back.</span>
+
+<span class="tp">float3</span> P = LocalPos;
+<span class="tp">float3</span> Offset = <span class="tp">float3</span>(<span class="num">0</span>, <span class="num">0</span>, <span class="num">0</span>);
+
+<span class="cm">// Early out if deformation is disabled</span>
+<span class="kw">if</span> (DeformEnabled &lt; <span class="num">0.5</span>)
+    <span class="kw">return</span> Offset;
+
+<span class="cm">// ---- Radial position in the XZ cross-section (Y = axial / width axis) ----</span>
+<span class="tp">float</span> R = <span class="fn">length</span>(<span class="tp">float2</span>(P.x, P.z));
+
+<span class="cm">// Rigid zone: bead-lock + inner rim don't deform</span>
+<span class="tp">float</span> RigidRadius = InnerRadiusCm + BeadLockPaddingCm;
+
+<span class="cm">// Radial mask: 0 at rigid zone, 1 at tread surface</span>
+<span class="tp">float</span> RadialMask = <span class="fn">smoothstep</span>(RigidRadius, OuterRadiusCm, R);
+
+<span class="cm">// Width mask: fade deformation near sidewall edges</span>
+<span class="tp">float</span> WidthMask = <span class="num">1.0</span> - <span class="fn">smoothstep</span>(HalfWidthCm * <span class="num">0.7</span>, HalfWidthCm, <span class="fn">abs</span>(P.y));
+
+<span class="cm">// ---- Counter-rotate: find angle relative to ground contact ----</span>
+<span class="cm">// The wheel spins; RotationAngleRad tracks cumulative spin.</span>
+<span class="cm">// Subtract it so the contact patch stays fixed at the bottom.</span>
+<span class="tp">float</span> Theta = <span class="fn">atan2</span>(P.z, P.x) - RotationAngleRad;
+
+<span class="cm">// Wrap to [-PI, PI]</span>
+Theta = Theta - <span class="num">6.28318530718</span> * <span class="fn">floor</span>((Theta + <span class="num">3.14159265359</span>) / <span class="num">6.28318530718</span>);
+
+<span class="cm">// ---- Contact patch mask ----</span>
+<span class="cm">// PatchHalfAngleRad defines half-width of the contact zone in radians.</span>
+<span class="cm">// Contact is at Theta ≈ -PI/2 (bottom of wheel, -Z in local space).</span>
+<span class="tp">float</span> AngleFromGround = <span class="fn">abs</span>(Theta + <span class="num">1.57079632679</span>);  <span class="cm">// distance from -PI/2</span>
+<span class="tp">float</span> ContactMask = <span class="num">1.0</span> - <span class="fn">smoothstep</span>(PatchHalfAngleRad * <span class="num">0.6</span>, PatchHalfAngleRad, AngleFromGround);
+ContactMask *= ContactAlpha;  <span class="cm">// zero when wheel is airborne</span>
+
+<span class="cm">// ---- Flatten: push tread vertices inward at contact patch ----</span>
+<span class="cm">// Direction is radially inward (toward axle center in XZ plane)</span>
+<span class="tp">float2</span> RadialDir = (R > <span class="num">0.001</span>) ? <span class="tp">float2</span>(P.x, P.z) / R : <span class="tp">float2</span>(<span class="num">0</span>, <span class="num">-1</span>);
+<span class="tp">float</span> FlattenWeight = ContactMask * RadialMask * WidthMask;
+Offset.x -= RadialDir.x * FlattenAmountCm * FlattenWeight;
+Offset.z -= RadialDir.y * FlattenAmountCm * FlattenWeight;
+
+<span class="cm">// ---- Bulge: push sidewall outward (Y axis) near contact patch ----</span>
+<span class="cm">// When the tire flattens at the bottom, rubber bulges outward axially.</span>
+<span class="tp">float</span> SidewallMask = <span class="fn">smoothstep</span>(HalfWidthCm * <span class="num">0.4</span>, HalfWidthCm, <span class="fn">abs</span>(P.y));
+<span class="tp">float</span> BulgeWeight = ContactMask * RadialMask * SidewallMask;
+Offset.y += <span class="fn">sign</span>(P.y) * BulgeAmountCm * BulgeWeight;
+
+<span class="cm">// ---- Pressure effect: under-inflation bulges sidewall uniformly ----</span>
+<span class="tp">float</span> PressureBulge = <span class="fn">saturate</span>(<span class="num">1.0</span> - PressureRatio) * <span class="num">0.5</span>;
+Offset.y += <span class="fn">sign</span>(P.y) * PressureBulge * SidewallMask * RadialMask;
+
+<span class="cm">// ---- Wear: worn tread is slightly thinner radially ----</span>
+<span class="tp">float</span> WearShrink = WearAlpha * <span class="num">0.3</span>;  <span class="cm">// up to 0.3 cm inward at full wear</span>
+Offset.x -= RadialDir.x * WearShrink * RadialMask * WidthMask;
+Offset.z -= RadialDir.y * WearShrink * RadialMask * WidthMask;
+
+<span class="cm">// ---- Suspension displacement: whole tire shifts along Z ----</span>
+Offset.z += SuspensionDispCm;
+
+<span class="kw">return</span> Offset;
+</code></pre>
+
+<div class="note">
+  <strong>Plain-text version (without HTML formatting) to paste directly:</strong>
+</div>
+
+<pre style="background:#0a0a18; border-color:#555;"><code style="color:#e0e0e0;">// Tire deformation WPO — local space in, local-space offset out.
+// The material's TransformPosition (W-&gt;L) feeds LocalPos.
+// The material's TransformVector (L-&gt;W) converts our output back.
+
+float3 P = LocalPos;
+float3 Offset = float3(0, 0, 0);
+
+// Early out if deformation is disabled
+if (DeformEnabled &lt; 0.5)
+    return Offset;
+
+// ---- Radial position in the XZ cross-section (Y = axial / width axis) ----
+float R = length(float2(P.x, P.z));
+
+// Rigid zone: bead-lock + inner rim don't deform
+float RigidRadius = InnerRadiusCm + BeadLockPaddingCm;
+
+// Radial mask: 0 at rigid zone, 1 at tread surface
+float RadialMask = smoothstep(RigidRadius, OuterRadiusCm, R);
+
+// Width mask: fade deformation near sidewall edges
+float WidthMask = 1.0 - smoothstep(HalfWidthCm * 0.7, HalfWidthCm, abs(P.y));
+
+// ---- Counter-rotate: find angle relative to ground contact ----
+// The wheel spins; RotationAngleRad tracks cumulative spin.
+// Subtract it so the contact patch stays fixed at the bottom.
+float Theta = atan2(P.z, P.x) - RotationAngleRad;
+
+// Wrap to [-PI, PI]
+Theta = Theta - 6.28318530718 * floor((Theta + 3.14159265359) / 6.28318530718);
+
+// ---- Contact patch mask ----
+// PatchHalfAngleRad defines half-width of the contact zone in radians.
+// Contact is at Theta = -PI/2 (bottom of wheel, -Z in local space).
+float AngleFromGround = abs(Theta + 1.57079632679);  // distance from -PI/2
+float ContactMask = 1.0 - smoothstep(PatchHalfAngleRad * 0.6, PatchHalfAngleRad, AngleFromGround);
+ContactMask *= ContactAlpha;  // zero when wheel is airborne
+
+// ---- Flatten: push tread vertices inward at contact patch ----
+// Direction is radially inward (toward axle center in XZ plane)
+float2 RadialDir = (R &gt; 0.001) ? float2(P.x, P.z) / R : float2(0, -1);
+float FlattenWeight = ContactMask * RadialMask * WidthMask;
+Offset.x -= RadialDir.x * FlattenAmountCm * FlattenWeight;
+Offset.z -= RadialDir.y * FlattenAmountCm * FlattenWeight;
+
+// ---- Bulge: push sidewall outward (Y axis) near contact patch ----
+// When the tire flattens at the bottom, rubber bulges outward axially.
+float SidewallMask = smoothstep(HalfWidthCm * 0.4, HalfWidthCm, abs(P.y));
+float BulgeWeight = ContactMask * RadialMask * SidewallMask;
+Offset.y += sign(P.y) * BulgeAmountCm * BulgeWeight;
+
+// ---- Pressure effect: under-inflation bulges sidewall uniformly ----
+float PressureBulge = saturate(1.0 - PressureRatio) * 0.5;
+Offset.y += sign(P.y) * PressureBulge * SidewallMask * RadialMask;
+
+// ---- Wear: worn tread is slightly thinner radially ----
+float WearShrink = WearAlpha * 0.3;  // up to 0.3 cm inward at full wear
+Offset.x -= RadialDir.x * WearShrink * RadialMask * WidthMask;
+Offset.z -= RadialDir.y * WearShrink * RadialMask * WidthMask;
+
+// ---- Suspension displacement: whole tire shifts along Z ----
+Offset.z += SuspensionDispCm;
+
+return Offset;
+</code></pre>
+
+
+<!-- ================================================================ -->
+<!--               WIRING GUIDE: STEP BY STEP                        -->
+<!-- ================================================================ -->
+
+<h2>Step-by-Step Wiring Instructions</h2>
+
+<h3>Step 1: Create the Material</h3>
+<p>Content Browser → right-click → Material. Name it <code>M_TireDeform</code>. Double-click to open.</p>
+<p>In Material Details:</p>
+<ul>
+  <li><strong>Material Domain</strong>: Surface</li>
+  <li><strong>Blend Mode</strong>: Opaque</li>
+  <li><strong>Shading Model</strong>: Default Lit</li>
+  <li><strong>Used with Skeletal Mesh</strong>: check if tire is part of skeletal mesh, otherwise leave off</li>
+  <li><strong>Used with Static Meshes</strong>: check if tire is a static mesh component</li>
+</ul>
+
+<h3>Step 2: Add the 14 Scalar Parameter nodes</h3>
+<p>For each parameter in the table above: right-click the graph → search <strong>"ScalarParameter"</strong> → place it → set its <strong>Parameter Name</strong>
+to the exact string from the "C++ FName" column (e.g. <code>Tire_Deform_Enabled</code>). Leave default values at 0 except:</p>
+<ul>
+  <li><code>Tire_Deform_Enabled</code> → default <strong>1.0</strong></li>
+  <li><code>Tire_OuterRadiusCm</code> → default <strong>35.0</strong></li>
+  <li><code>Tire_InnerRadiusCm</code> → default <strong>20.0</strong></li>
+  <li><code>Tire_HalfWidthCm</code> → default <strong>12.0</strong></li>
+  <li><code>Tire_BeadLockPaddingCm</code> → default <strong>3.0</strong></li>
+  <li><code>Tire_PressureRatio</code> → default <strong>1.0</strong></li>
+  <li><code>Tire_LoadRatio</code> → default <strong>1.0</strong></li>
+</ul>
+<p style="color:#888; font-size:11px;">These defaults make the tire look normal when C++ hasn't written values yet (e.g. in the material preview viewport).</p>
+
+<h3>Step 3: Absolute World Position</h3>
+<p>Right-click → search <strong>"WorldPosition"</strong> → add <strong>Absolute World Position</strong> node.</p>
+
+<h3>Step 4: Transform Position (World → Local)</h3>
+<p>Right-click → search <strong>"TransformPosition"</strong> → add the <strong>Transform Position</strong> node.</p>
+<ul>
+  <li>Set <strong>Source</strong>: World</li>
+  <li>Set <strong>Destination</strong>: Local</li>
+  <li>Wire the output of Absolute World Position into its input.</li>
+</ul>
+
+<h3>Step 5: Custom Node</h3>
+<p>Right-click → search <strong>"Custom"</strong> → add a <strong>Custom</strong> expression node.</p>
+<ul>
+  <li>In the Details panel, set <strong>Output Type</strong> to <code>CMOT Float 3</code></li>
+  <li>Set <strong>Description</strong> to <code>TireDeformWPO</code></li>
+  <li>Click the <strong>"+"</strong> button next to Inputs <strong>15 times</strong> to add 15 inputs</li>
+  <li>Rename them in order (see table above): <code>LocalPos</code>, <code>DeformEnabled</code>, <code>OuterRadiusCm</code>, ... through <code>SuspensionDispCm</code></li>
+  <li>For <code>LocalPos</code>: set Input Type to <strong>Float 3</strong></li>
+  <li>For all others: Input Type stays <strong>Float 1</strong> (default)</li>
+  <li>Paste the HLSL code from the plain-text box above into the <strong>Code</strong> field</li>
+</ul>
+
+<h3>Step 6: Wire Inputs to Custom Node</h3>
+<table>
+  <tr><th>Custom Input</th><th>Wire From</th></tr>
+  <tr><td class="mono">LocalPos</td><td>Output of TransformPosition (World→Local) node</td></tr>
+  <tr><td class="mono">DeformEnabled</td><td>Scalar Parameter "Tire_Deform_Enabled"</td></tr>
+  <tr><td class="mono">OuterRadiusCm</td><td>Scalar Parameter "Tire_OuterRadiusCm"</td></tr>
+  <tr><td class="mono">InnerRadiusCm</td><td>Scalar Parameter "Tire_InnerRadiusCm"</td></tr>
+  <tr><td class="mono">HalfWidthCm</td><td>Scalar Parameter "Tire_HalfWidthCm"</td></tr>
+  <tr><td class="mono">BeadLockPaddingCm</td><td>Scalar Parameter "Tire_BeadLockPaddingCm"</td></tr>
+  <tr><td class="mono">PressureRatio</td><td>Scalar Parameter "Tire_PressureRatio"</td></tr>
+  <tr><td class="mono">LoadRatio</td><td>Scalar Parameter "Tire_LoadRatio"</td></tr>
+  <tr><td class="mono">ContactAlpha</td><td>Scalar Parameter "Tire_ContactAlpha"</td></tr>
+  <tr><td class="mono">WearAlpha</td><td>Scalar Parameter "Tire_WearAlpha"</td></tr>
+  <tr><td class="mono">FlattenAmountCm</td><td>Scalar Parameter "Tire_FlattenAmountCm"</td></tr>
+  <tr><td class="mono">BulgeAmountCm</td><td>Scalar Parameter "Tire_BulgeAmountCm"</td></tr>
+  <tr><td class="mono">PatchHalfAngleRad</td><td>Scalar Parameter "Tire_PatchHalfAngleRad"</td></tr>
+  <tr><td class="mono">RotationAngleRad</td><td>Scalar Parameter "Tire_RotationAngleRad"</td></tr>
+  <tr><td class="mono">SuspensionDispCm</td><td>Scalar Parameter "Tire_SuspensionDispCm"</td></tr>
+</table>
+
+<h3>Step 7: Transform Vector (Local → World)</h3>
+<p>Right-click → search <strong>"TransformVector"</strong> → add the <strong>Transform Vector</strong> node.</p>
+<ul>
+  <li>Set <strong>Source</strong>: Local</li>
+  <li>Set <strong>Destination</strong>: World</li>
+  <li>Wire the Custom node's output into this node's input.</li>
+</ul>
+
+<h3>Step 8: Connect to Material Result</h3>
+<p>Wire the TransformVector output into the <strong>World Position Offset</strong> pin on the Material Result node.</p>
+
+<h3>Step 9: Apply and Test</h3>
+<p>Apply the material. Create a Material Instance Dynamic in C++ or assign the material to the tire mesh.
+VehicleSolver will create the MID and push parameters automatically — see <code>VehicleSolver.cpp:6984-7003</code>.</p>
+
+
+<!-- ================================================================ -->
+<!--                 COMMON MISTAKES                                  -->
+<!-- ================================================================ -->
+
+<h2>Common Mistakes</h2>
+
+<table>
+  <tr><th>Mistake</th><th>Symptom</th><th>Fix</th></tr>
+  <tr>
+    <td>Wrong Output Type on Custom node</td>
+    <td>WPO pin shows type mismatch error</td>
+    <td>Must be <strong>CMOT Float 3</strong>, not Float 1</td>
+  </tr>
+  <tr>
+    <td>Input names don't match C++ FNames</td>
+    <td>Tire doesn't deform (values stay 0)</td>
+    <td>The <em>Custom node input names</em> can be anything — they're local HLSL variable names.
+        The <strong>Scalar Parameter names</strong> must match C++ exactly (case-sensitive).</td>
+  </tr>
+  <tr>
+    <td>Forgot TransformPosition (W→L)</td>
+    <td>Deformation swims when camera moves</td>
+    <td>HLSL expects local-space coords. Without the W→L transform, vertices are in world space.</td>
+  </tr>
+  <tr>
+    <td>Forgot TransformVector (L→W)</td>
+    <td>Deformation direction is wrong / rotates with view</td>
+    <td>WPO expects a world-space offset. Our HLSL outputs local-space, so we must convert back.</td>
+  </tr>
+  <tr>
+    <td>Using TransformPosition instead of TransformVector for Step 7</td>
+    <td>Offset has wrong origin (position vs direction)</td>
+    <td>Step 4 uses TransformPosition (converts a point). Step 7 uses TransformVector (converts a direction/offset).</td>
+  </tr>
+  <tr>
+    <td>Missing SuspensionDispCm input</td>
+    <td>HLSL compile error: "use of undeclared identifier 'SuspensionDispCm'"</td>
+    <td>Add the 15th input. The original ChatGPT version omitted it.</td>
+  </tr>
+  <tr>
+    <td>LocalPos input type set to Float 1</td>
+    <td>HLSL compile error on <code>float3 P = LocalPos</code></td>
+    <td>LocalPos must be <strong>Float 3</strong> in the Custom node input type dropdown.</td>
+  </tr>
+</table>
+
+
+<!-- ================================================================ -->
+<!--                   WHAT EACH EFFECT DOES                          -->
+<!-- ================================================================ -->
+
+<h2>Visual Effects Breakdown</h2>
+
+<table>
+  <tr><th>Effect</th><th>What It Looks Like</th><th>Driven By</th></tr>
+  <tr>
+    <td><strong>Contact Flatten</strong></td>
+    <td>Bottom of tire squishes flat where it touches the ground</td>
+    <td>FlattenAmountCm, ContactAlpha, PatchHalfAngleRad</td>
+  </tr>
+  <tr>
+    <td><strong>Sidewall Bulge</strong></td>
+    <td>Rubber bulges outward at the sidewalls near the contact patch</td>
+    <td>BulgeAmountCm, ContactAlpha</td>
+  </tr>
+  <tr>
+    <td><strong>Pressure Bulge</strong></td>
+    <td>Under-inflated tire has permanently wider sidewalls</td>
+    <td>PressureRatio (below 1.0 = under-inflated)</td>
+  </tr>
+  <tr>
+    <td><strong>Counter-Rotation</strong></td>
+    <td>The flat spot stays at the ground as the wheel spins</td>
+    <td>RotationAngleRad</td>
+  </tr>
+  <tr>
+    <td><strong>Wear Thinning</strong></td>
+    <td>Worn tread is slightly thinner (tread surface moves inward)</td>
+    <td>WearAlpha (0=new, 1=bald)</td>
+  </tr>
+  <tr>
+    <td><strong>Suspension Shift</strong></td>
+    <td>Whole tire moves up/down with suspension travel</td>
+    <td>SuspensionDispCm</td>
+  </tr>
+  <tr>
+    <td><strong>Bead Lock Rigidity</strong></td>
+    <td>Inner rim area doesn't deform (stays rigid)</td>
+    <td>InnerRadiusCm + BeadLockPaddingCm</td>
+  </tr>
+</table>
+
+
+<p style="color:#555; font-size:10px; margin-top:30px; border-top:1px solid #333; padding-top:10px;">
+  Verified against VehicleSolver.cpp FName constants (lines 31-44) and MID writes (lines 6988-7001). All UE5 node names confirmed real.
+  HLSL compiles as a Custom node with Output Type CMOT Float 3 and 15 inputs.
+</p>
+
+</body>
+</html>

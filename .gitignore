@@ -1,24 +1,36 @@
-# Unreal Engine .gitignore
-# Only track: Source/, Config/, Content/, and *.uproject
+# Unreal Engine .gitignore - Source Only
 
 # Ignore everything by default
 *
 
-# Allow these folders
+# Allow source code and config
 !Source/
 !Source/**
 !Config/
 !Config/**
-!Content/
-!Content/**
 
-# Allow project file
+# Allow Plugins source and descriptors
+!Plugins/
+!Plugins/*/
+!Plugins/*/*.uplugin
+!Plugins/*/Source/
+!Plugins/*/Source/**
+
+# Allow project files and scripts
 !*.uproject
+!*.code-workspace
+!*.bat
 
 # Allow .gitignore itself
 !.gitignore
 
-# Ignore binaries and build artifacts even in tracked folders
+# Explicitly ignore Content and asset binaries
+Content/
+Content/**
+*.uasset
+*.umap
+
+# Ignore binaries, build artifacts, and intermediate files
 *.dll
 *.exe
 *.pdb
@@ -26,3 +38,23 @@
 *.a
 *.so
 *.dylib
+*.exp
+*.obj
+Binaries/
+*/Binaries/
+*/*/Binaries/
+Intermediate/
+*/Intermediate/
+*/*/Intermediate/
+DerivedDataCache/
+Saved/
+.freebuff/
+
+# Ignore Python cache & bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Ignore web / prototype dependencies
+node_modules/
+dist/

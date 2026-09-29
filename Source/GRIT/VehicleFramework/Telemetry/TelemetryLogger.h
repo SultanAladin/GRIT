@@ -37,7 +37,7 @@ struct FTelemetrySample
     //--------------------------------------------------------------------------
     // TURBO STATE
     //--------------------------------------------------------------------------
-    float BoostRatio = 1.0f;                // [-] - Boost pressure ratio
+    float BoostGauge_bar = 0.0f;            // [bar] - Boost pressure above ambient
     float TurboShaftRPM = 0.0f;             // [rpm] - Turbo shaft speed
     float ManifoldPressure_kPa = 101.325f;  // [kPa] - Manifold absolute pressure
 
@@ -92,6 +92,7 @@ struct FTelemetrySample
     float Wheel_SelfAlignTorque_Nm[4] = {0};// [Nm] - Self-aligning torque
     float Wheel_PneumaticTrail_m[4] = {0};  // [m] - Pneumatic trail
     bool Wheel_InContact[4] = {false};      // [-] - Ground contact state
+    int32 Wheel_Code[4] = {0};              // [-] - Wheel position code (FL/FR/RL/RR raw int8 from E_WheelCode)
 
     //--------------------------------------------------------------------------
     // BRAKE THERMAL STATE
@@ -236,6 +237,80 @@ struct FPerformanceSample
 };
 
 //====================================================================================================================================================
+//                                              TRANSMISSION/CLUTCH EVENT SAMPLE
+//                                    Replaces runtime UE_LOG spam in VehicleSolver
+//                                    (Audio, Launch, Clutch, ShiftGate, DriveSplit, Handbrake)
+//====================================================================================================================================================
+
+struct FTransmissionTelemetrySample
+{
+    // Source tag: 0=Audio, 1=Launch, 2=Clutch, 3=ShiftGate, 4=DriveSplit, 5=Handbrake
+    uint8 EventType = 0;
+
+    // Common timing
+    float Time_s = 0.0f;
+
+    // Engine / drivetrain
+    float EngineRPM = 0.0f;
+    float EngineTorque_Nm = 0.0f;
+    float Boost_bar = 0.0f;
+    int32 GearCurrent = 0;
+    int32 GearTarget = 0;
+    uint8 bIsShifting = 0;
+    float ClutchEngagement = 0.0f;
+    float ClutchEngagement_Prev = 0.0f;     // Launch-only
+    float ClutchTargetEngagement = 0.0f;    // Launch-only
+    float ClutchInterpSpeed = 0.0f;         // Launch-only
+    float ClutchCapacity_Nm = 0.0f;         // Clutch-only
+    float ClutchTorque_Nm = 0.0f;
+    float SlipRPM = 0.0f;
+    float TransInputRPM = 0.0f;             // Clutch-only
+    uint8 bClutchLocked = 0;                // Clutch-only
+    uint8 bSaturated = 0;                   // Clutch-only
+
+    // Inputs / motion
+    float Throttle = 0.0f;
+    float Handbrake = 0.0f;                 // Handbrake-only
+    float ForwardSpeed_ms = 0.0f;
+    float LateralSpeed_ms = 0.0f;
+
+    // ShiftGate-specific
+    float UpshiftRPM = 0.0f;
+    float PredictedNextRPM = 0.0f;
+    float MinRequiredRPM = 0.0f;
+    float GearHysteresisTimer = 0.0f;
+    uint8 bShouldUpshift = 0;
+
+    // DriveSplit-specific
+    float TransOutputTorque_Nm = 0.0f;
+    float TorqueToFront_Nm = 0.0f;
+    float TorqueToRear_Nm = 0.0f;
+    float RearSplit_K = 0.0f;
+    float RearSplit_V = 0.0f;
+    float DriveTq_W[4] = {0};
+    int32 WheelCodes[4] = {0};
+    int32 FL_n = 0;
+    int32 FR_n = 0;
+    int32 RL_n = 0;
+    int32 RR_n = 0;
+    uint8 bRearBlockRan = 0;
+    int32 CenterDiff_DriveConfig = 0;
+    int32 CenterDiff_Type = 0;
+    float CenterDiff_FrontRearBias = 0.0f;
+
+    // Handbrake-specific
+    int32 WheelIndex = 0;
+    uint8 bIsRearWheel = 0;
+    float HandbrakeTarget_Pa = 0.0f;
+    float BrakePressure_Pa = 0.0f;
+    float BrakeTorque_Nm = 0.0f;
+    float WheelOmega_rads = 0.0f;
+    float Speed_ms = 0.0f;
+    float BrakeTemp_K = 0.0f;
+    float BrakeFricCoeff = 0.0f;
+};
+
+//====================================================================================================================================================
 //                                              SCOPED TIMER HELPER
 //                                    RAII timer for measuring function execution
 //====================================================================================================================================================
@@ -292,8 +367,9 @@ public:
         const FClutchStateVector& ClutchState,
         const FVehicleSolverAxleData_PT& AxleData,
         const TArray<FBrakingStateVector>& BrakeStates,
-        float BoostRatio,
+        float BoostGaugeBar,
         float TurboRPM,
+        float ManifoldPressure_Pa,
         float CoolantTemp_K,
         float OilTemp_K,
         const TArray<float>& StaticLoads = TArray<float>()

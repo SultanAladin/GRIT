@@ -55,7 +55,8 @@ struct FAxleMember
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Core")
     FName AxleID = TEXT("AxleMount_Default");   // [-] - Wheel socket name
 
-    int8 WheelCode = 0;                         // [-] - Wheel position code
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Core")
+    int32 WheelCode = 0;                        // [-] - Wheel position code
 
     //--------------------------------------------------------------------------
     // COMPONENT SPECIFICATIONS
@@ -83,7 +84,7 @@ struct FAxleMember
     FAxleMember() = default;
 
     /** Construct with wheel position code */
-    FAxleMember(E_WheelCode Code) : WheelCode(static_cast<int8>(Code)) {}
+    FAxleMember(E_WheelCode Code) : WheelCode(static_cast<int32>(Code)) {}
 };
 
 //------------------------------------------------------------------------------
@@ -157,6 +158,7 @@ struct FAssemblyLoadout
         Members[2].SuspensionSpecs.NaturalFrequency = 2.3f;                 // [Hz] - Slightly softer rear
         Members[2].SuspensionSpecs.DampingRatio = 0.65f;                    // [-] - Moderate damping
         Members[2].BrakingSpecifications.MaxBrakePressure = 8.0e6f;         // [Pa] - 35% rear bias
+        Members[2].BrakingSpecifications.MaxHandbrakePressure = 20.0e6f;     // [Pa] - 200 bar handbrake (authoritative)
         Members[2].BrakingSpecifications.DiskOuterRadius = 0.195f;          // [m] - 390mm rotor
         Members[2].BrakingSpecifications.NumPistons = 4;                    // [-] - 4-piston caliper
 
@@ -177,6 +179,7 @@ struct FAssemblyLoadout
         Members[3].SuspensionSpecs.NaturalFrequency = 2.3f;                 // [Hz] - Slightly softer rear
         Members[3].SuspensionSpecs.DampingRatio = 0.65f;                    // [-] - Moderate damping
         Members[3].BrakingSpecifications.MaxBrakePressure = 8.0e6f;         // [Pa] - 35% rear bias
+        Members[3].BrakingSpecifications.MaxHandbrakePressure = 20.0e6f;     // [Pa] - 200 bar handbrake (authoritative)
         Members[3].BrakingSpecifications.DiskOuterRadius = 0.195f;          // [m] - 390mm rotor
         Members[3].BrakingSpecifications.NumPistons = 4;                    // [-] - 4-piston caliper
 
@@ -258,6 +261,7 @@ struct FAssemblyLoadout
         Members[2].SuspensionSpecs.HardeningFactor = 1.5f;                  // [-] - Moderate hardening
         Members[2].SuspensionSpecs.NaturalFrequency = 2.0f;                 // [Hz] - Comfort setup
         Members[2].SuspensionSpecs.DampingRatio = 0.6f;                     // [-] - Standard damping
+        Members[2].BrakingSpecifications.MaxHandbrakePressure = 20.0e6f;     // [Pa] - 200 bar handbrake (authoritative)
 
         //----------------------------------------------------------------------
         // REAR RIGHT
@@ -275,6 +279,7 @@ struct FAssemblyLoadout
         Members[3].SuspensionSpecs.HardeningFactor = 1.5f;                  // [-] - Moderate hardening
         Members[3].SuspensionSpecs.NaturalFrequency = 2.0f;                 // [Hz] - Comfort setup
         Members[3].SuspensionSpecs.DampingRatio = 0.6f;                     // [-] - Standard damping
+        Members[3].BrakingSpecifications.MaxHandbrakePressure = 20.0e6f;     // [Pa] - 200 bar handbrake (authoritative)
 
         //----------------------------------------------------------------------
         // ANTI-ROLLBARS - Front (0-1) + Rear (2-3)

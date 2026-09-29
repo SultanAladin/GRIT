@@ -4,7 +4,7 @@
 #include "InputTensor.generated.h"
 
 //------------------------------------------------------------------------------
-// 🧩 Input Device Types
+//                              input device types
 //------------------------------------------------------------------------------
 
 /** Supported input device types */
@@ -18,7 +18,35 @@ enum class EVehicleInputDevice : uint8
 };
 
 //------------------------------------------------------------------------------
-// 🧩 Simple Input Tensor
+//                              input flag bitmask
+//------------------------------------------------------------------------------
+
+/** Packed digital input flags — single uint32 replicated instead of 17 bools */
+enum class EInputFlag : uint32
+{
+    None               = 0,
+    ReverseRequest     = 1 << 0,   // [deprecated] reverse is now reached via sequential ShiftDown past Neutral; bit kept to preserve replicated wire format
+    ShiftUp            = 1 << 1,   // Sequential upshift pulse
+    ShiftDown          = 1 << 2,   // Sequential downshift pulse
+    GearUp             = 1 << 3,   // Manual gear up command
+    GearDown           = 1 << 4,   // Manual gear down command
+    TransModeToggle    = 1 << 5,   // Auto/manual transmission toggle
+    EngineToggle       = 1 << 6,   // Engine start/stop
+    Boost              = 1 << 7,   // Nitro / turbo activation
+    OverDrive          = 1 << 8,   // Context-sensitive performance trigger
+    DiffLockToggle     = 1 << 9,   // Cycle differential lock mode
+    TCSToggle          = 1 << 10,  // Traction control toggle
+    ABSToggle          = 1 << 11,  // Anti-lock braking toggle
+    StabilityToggle    = 1 << 12,  // Stability control toggle
+    LaunchControl      = 1 << 13,  // Launch control activation
+    DriftMode          = 1 << 14,  // Drift mode toggle
+    ResetVehicle       = 1 << 15,  // Reset vehicle to upright
+    AerodynamicBraking = 1 << 16,  // Air brake activation
+};
+ENUM_CLASS_FLAGS(EInputFlag);
+
+//------------------------------------------------------------------------------
+//                              input tensor
 //------------------------------------------------------------------------------
 
 /** FInputTensor - Final processed input snapshot for physics thread */
@@ -28,7 +56,7 @@ struct GRIT_API FInputTensor
     GENERATED_BODY()
 
     //------------------------------------------------------------------------------
-    // 🧩 Core Analog Inputs
+    //                              analog inputs
     //------------------------------------------------------------------------------
 
     /** Throttle analog (0.0 = none, 1.0 = full) */
@@ -39,102 +67,37 @@ struct GRIT_API FInputTensor
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input|Analog")
     float Brake = 0.0f; // [-] (unitless)
 
-    /** Reverse request pulse (set by double-tapping brake input) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input|Transmission")
-    bool bReverseRequest = false;
-
     /** Steering analog (-1.0 left .. 0 .. 1.0 right) */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input|Analog")
     float Steering = 0.0f; // [-] (unitless)
 
     /** Handbrake analog (0.0..1.0) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input|Analog")
     float Handbrake = 0.0f; // [-] (unitless)
 
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input")
-    bool ShiftUp = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input")
-    bool ShiftDown = false;
-
     /** Clutch pedal input (0=engaged, 1=disengaged) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input|Transmission")
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input|Analog")
     float Clutch = 0.0f; // [-] (unitless)
 
     //------------------------------------------------------------------------------
-    // 🧩 Transmission Digital Inputs
+    //                          digital input flags
     //------------------------------------------------------------------------------
 
-    /** Manual gear up command */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input|Transmission")
-    bool bGearUp = false;
-
-    /** Manual gear down command */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input|Transmission")
-    bool bGearDown = false;
-
-    /** Toggle between automatic/manual mode */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input|Transmission")
-    bool bTransModeToggle = false;
+    /** Packed bitmask of all digital inputs (see EInputFlag) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input|Flags")
+    int32 InputFlags = 0;
 
     //------------------------------------------------------------------------------
-    // 🧩 Engine Control Inputs
+    //                          flag accessors
     //------------------------------------------------------------------------------
 
-    /** Engine start/stop toggle */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input|Engine")
-    bool bEngineToggle = false;
-
-    /** Engine boost/turbo button */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input|Engine")
-    bool bBoost = false;
-
-    /** Context-sensitive performance trigger (N->1st when neutral, boost when in gear) */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input|Performance")
-    bool bOverDrive = false;
+    FORCEINLINE bool HasFlag(EInputFlag F) const { return (InputFlags & static_cast<int32>(F)) != 0; }
+    FORCEINLINE void SetFlag(EInputFlag F) { InputFlags |= static_cast<int32>(F); }
+    FORCEINLINE void ClearFlag(EInputFlag F) { InputFlags &= ~static_cast<int32>(F); }
+    FORCEINLINE void SetFlagValue(EInputFlag F, bool bOn) { if (bOn) SetFlag(F); else ClearFlag(F); }
 
     //------------------------------------------------------------------------------
-    // 🧩 Differential & Traction Inputs
-    //------------------------------------------------------------------------------
-
-    /** Cycle differential lock mode */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input|Differential")
-    bool bDiffLockToggle = false;
-
-    /** Toggle traction control system */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input|TCS")
-    bool bTCSToggle = false;
-
-    /** Toggle anti-lock braking system */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input|ABS")
-    bool bABSToggle = false;
-
-    /** Toggle stability control */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input|Stability")
-    bool bStabilityToggle = false;
-
-    //------------------------------------------------------------------------------
-    // 🧩 Advanced Vehicle Inputs
-    //------------------------------------------------------------------------------
-
-    /** Launch control activation */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input|Advanced")
-    bool bLaunchControl = false;
-
-    /** Drift mode toggle */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input|Advanced")
-    bool bDriftMode = false;
-
-    /** Reset vehicle to upright position */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input|Advanced")
-    bool bResetVehicle = false;
-
-    /** Aerodynamic braking (air brake) activation */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input|Advanced")
-    bool bAerodynamicBraking = false;
-
-    //------------------------------------------------------------------------------
-    // 🧩 Input Device Metadata
+    //                          device metadata
     //------------------------------------------------------------------------------
 
     /** Current active input device type */
@@ -150,66 +113,19 @@ struct GRIT_API FInputTensor
     float Timestamp = 0.0f; // [s]
 
     //------------------------------------------------------------------------------
-    // 🧩 Constructors
-    //------------------------------------------------------------------------------
-
-    FInputTensor()
-        : Throttle(0.0f)
-        , Brake(0.0f)
-        , bReverseRequest(false)
-        , Steering(0.0f)
-        , Handbrake(0.0f)
-        , ShiftUp(false)
-        , ShiftDown(false)
-        , Clutch(0.0f)
-        , bGearUp(false)
-        , bGearDown(false)
-        , bTransModeToggle(false)
-        , bEngineToggle(false)
-        , bBoost(false)
-        , bOverDrive(false)  // <-- ADD THIS
-        , bDiffLockToggle(false)
-        , bTCSToggle(false)
-        , bABSToggle(false)
-        , bStabilityToggle(false)
-        , bLaunchControl(false)
-        , bDriftMode(false)
-        , bResetVehicle(false)
-        , bAerodynamicBraking(false)
-        , DeviceType(EVehicleInputDevice::None)
-        , InputMagnitude(0.0f)
-        , Timestamp(0.0f)
-    {
-    }
-
-    //------------------------------------------------------------------------------
-    // 🧩 Utilities
+    //                              utilities
     //------------------------------------------------------------------------------
 
     /** Reset all inputs to default state */
     void FlushInputs()
     {
-    Throttle = 0.0f;
-    Brake = 0.0f;
-    bReverseRequest = false;
-    Steering = 0.0f;
-    Handbrake = 0.0f;
-    Clutch = 0.0f;
-    bGearUp = false;
-    bGearDown = false;
-    bTransModeToggle = false;
-    bEngineToggle = false;
-    bBoost = false;
-    bOverDrive = false;
-    bDiffLockToggle = false;
-    bTCSToggle = false;
-    bABSToggle = false;
-    bStabilityToggle = false;
-    bLaunchControl = false;
-    bDriftMode = false;
-    bResetVehicle = false;
-    bAerodynamicBraking = false;
-    InputMagnitude = 0.0f;
+        Throttle = 0.0f;
+        Brake = 0.0f;
+        Steering = 0.0f;
+        Handbrake = 0.0f;
+        Clutch = 0.0f;
+        InputFlags = 0;
+        InputMagnitude = 0.0f;
     }
 
     bool NearlyEquals(const FInputTensor& Other, float AnalogTolerance = 1.e-3f) const
@@ -221,33 +137,17 @@ struct GRIT_API FInputTensor
 
         return AnalogEqual(Throttle, Other.Throttle)
             && AnalogEqual(Brake, Other.Brake)
-            && bReverseRequest == Other.bReverseRequest
             && AnalogEqual(Steering, Other.Steering)
             && AnalogEqual(Handbrake, Other.Handbrake)
-            && ShiftUp == Other.ShiftUp
-            && ShiftDown == Other.ShiftDown
             && AnalogEqual(Clutch, Other.Clutch)
-            && bGearUp == Other.bGearUp
-            && bGearDown == Other.bGearDown
-            && bTransModeToggle == Other.bTransModeToggle
-            && bEngineToggle == Other.bEngineToggle
-            && bBoost == Other.bBoost
-            && bOverDrive == Other.bOverDrive
-            && bDiffLockToggle == Other.bDiffLockToggle
-            && bTCSToggle == Other.bTCSToggle
-            && bABSToggle == Other.bABSToggle
-            && bStabilityToggle == Other.bStabilityToggle
-            && bLaunchControl == Other.bLaunchControl
-            && bDriftMode == Other.bDriftMode
-            && bResetVehicle == Other.bResetVehicle
-            && bAerodynamicBraking == Other.bAerodynamicBraking
+            && InputFlags == Other.InputFlags
             && DeviceType == Other.DeviceType
             && AnalogEqual(InputMagnitude, Other.InputMagnitude);
     }
 };
 
 //------------------------------------------------------------------------------
-// 🧩 Input Configuration
+//                          input configuration
 //------------------------------------------------------------------------------
 
 /** FVehicleInputConfig - Configuration for input sensitivity and dead zones */
@@ -257,7 +157,7 @@ struct GRIT_API FVehicleInputConfig
     GENERATED_BODY()
 
     //------------------------------------------------------------------------------
-    // 🧩 Sensitivity Settings
+    //                          sensitivity settings
     //------------------------------------------------------------------------------
 
     /** Steering sensitivity multiplier */
@@ -273,7 +173,7 @@ struct GRIT_API FVehicleInputConfig
     float BrakeSensitivity = 1.0f; // [-] (dimensionless)
 
     //------------------------------------------------------------------------------
-    // 🧩 Dead Zone Settings
+    //                          dead zone settings
     //------------------------------------------------------------------------------
 
     /** Steering dead zone */
@@ -289,7 +189,7 @@ struct GRIT_API FVehicleInputConfig
     float BrakeDeadZone = 0.02f; // [-] (dimensionless)
 
     //------------------------------------------------------------------------------
-    // 🧩 Device Detection Settings
+    //                          device detection settings
     //------------------------------------------------------------------------------
 
     /** Current active input device */
@@ -309,7 +209,7 @@ struct GRIT_API FVehicleInputConfig
     float DeviceDetectionWindow = 0.5f; // [s]
 
     //------------------------------------------------------------------------------
-    // 🧩 Steering Wheel Specific Settings
+    //                          steering wheel settings
     //------------------------------------------------------------------------------
 
     /** Force feedback strength for steering wheels */
@@ -319,22 +219,4 @@ struct GRIT_API FVehicleInputConfig
     /** Steering wheel rotation range [deg] */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Input|Wheel", meta = (ClampMin = "90.0", ClampMax = "1080.0"))
     float WheelRotationRange = 900.0f; // [deg]
-
-    FVehicleInputConfig()
-        : SteeringSensitivity(1.0f)
-        , ThrottleSensitivity(1.0f)
-        , BrakeSensitivity(1.0f)
-        , SteeringDeadZone(0.05f)
-        , ThrottleDeadZone(0.02f)
-        , BrakeDeadZone(0.02f)
-        , ActiveInputDevice(EVehicleInputDevice::Keyboard)
-        , bAutoSwitchInputDevice(true)
-        , DeviceSwitchThreshold(0.1f)
-        , DeviceDetectionWindow(0.5f)
-        , FFBStrength(0.7f)
-        , WheelRotationRange(900.0f)
-    {
-    }
 };
-
-// ⚠️ Inconsistency detected: `QUBIT_API` export macro may not exist in Project Anvil modules; confirm or replace with appropriate module API specifier.

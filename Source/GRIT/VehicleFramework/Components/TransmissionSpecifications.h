@@ -20,6 +20,16 @@ enum class ETransmissionType : uint8
     DCT             // Dual-clutch system
 };
 
+/** Active phase of an in-progress gear shift (real-car sequencing). */
+UENUM(BlueprintType)
+enum class EShiftPhase : uint8
+{
+    None,           // Not shifting
+    ClutchRelease,  // Opening clutch, throttle cut, drivetrain decoupling
+    GearSwap,       // Drivetrain in neutral, gear ratio physically swapping
+    RevMatch        // Clutch closing, engine being pulled to new gear's input speed
+};
+
 //----------------------------------------------------------------------------------------------------------------------------------------
 //                                                  🧩 Transmission Specifications (Immutable)
 //----------------------------------------------------------------------------------------------------------------------------------------
@@ -138,16 +148,18 @@ struct FTransmissionStateVector
         , CurrentDownshiftRPM(0.0f)                 // [rev·min⁻¹]
         , PrevInputOmega_rad_s(0.0f)                // [rad·s⁻¹]
         , GearHysteresisTimer(0.0f)                 // [s]
+        , ShiftPhase(EShiftPhase::None)             // [-]
     {}
 
     int32 CurrentGear;                              // [index]
     int32 TargetGear;                               // [index]
     float CombinedGearRatio;                        // [ratio]
-    float ShiftTimer;                               // [s]
-    bool bIsShifting;                               // [-]
+    float ShiftTimer;                               // [s] - Per-phase countdown
+    bool bIsShifting;                               // [-] - True while ShiftPhase != None
     int32 PreSelectedGear;                          // [index]
     float CurrentUpshiftRPM;                        // [rev·min⁻¹]
     float CurrentDownshiftRPM;                      // [rev·min⁻¹]
     float PrevInputOmega_rad_s;                     // [rad·s⁻¹] - Previous input shaft speed
     float GearHysteresisTimer;                      // [s] - Auto-shift lockout timer
+    EShiftPhase ShiftPhase;                         // [-] - Active phase of in-progress shift
 };

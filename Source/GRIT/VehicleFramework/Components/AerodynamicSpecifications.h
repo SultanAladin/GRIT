@@ -15,9 +15,10 @@
  * 
  * @param SocketWorldLocations - Array of world space socket positions
  * @param CenterOfMass - World space center of mass position
- * @return FVector - Average socket position relative to COM (COM-relative offset)
+ * @param ReferenceTransform - Vehicle body transform used to convert the offset into body-local space
+ * @return FVector - Average socket position relative to COM in body-local coordinates
  */
-inline FVector ComputeForceApplicationPoint(const TArray<FVector>& SocketWorldLocations, const FVector& CenterOfMass)
+inline FVector ComputeForceApplicationPoint(const TArray<FVector>& SocketWorldLocations, const FVector& CenterOfMass, const FTransform& ReferenceTransform)
 {
     if (SocketWorldLocations.Num() == 0)
     {
@@ -31,7 +32,7 @@ inline FVector ComputeForceApplicationPoint(const TArray<FVector>& SocketWorldLo
     }
     AverageSocketLocation /= SocketWorldLocations.Num();
     
-    return AverageSocketLocation - CenterOfMass;
+    return ReferenceTransform.InverseTransformVectorNoScale(AverageSocketLocation - CenterOfMass);
 }
 
 //------------------------------------------------------------------------------
@@ -190,6 +191,8 @@ struct FAerodynamicForces_PT
     float VortexGenDrag_N = 0.0f;           // [N] Vortex generator drag
     float BodyDrag_N = 0.0f;                // [N] Body drag
     float BodyLift_N = 0.0f;                // [N] Body lift (positive = upward)
+    float UnderbodyRideHeight_m = 0.0f;     // [m] Effective underbody ride height used this frame
+    float UnderbodyRideHeightFactor = 1.0f; // [-] Ground-effect multiplier used this frame
 };
 
 //------------------------------------------------------------------------------

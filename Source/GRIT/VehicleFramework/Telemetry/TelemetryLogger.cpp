@@ -19,8 +19,9 @@ void FTelemetryHelper::PopulateSample(
     const FClutchStateVector& ClutchState,
     const FVehicleSolverAxleData_PT& AxleData,
     const TArray<FBrakingStateVector>& BrakeStates,
-    float BoostRatio,
+    float BoostGaugeBar,
     float TurboRPM,
+    float ManifoldPressure_Pa,
     float CoolantTemp_K,
     float OilTemp_K,
     const TArray<float>& StaticLoads
@@ -53,9 +54,9 @@ void FTelemetryHelper::PopulateSample(
     //--------------------------------------------------------------------------
     // TURBO STATE
     //--------------------------------------------------------------------------
-    Sample.BoostRatio = BoostRatio;
+    Sample.BoostGauge_bar = BoostGaugeBar;
     Sample.TurboShaftRPM = TurboRPM;
-    Sample.ManifoldPressure_kPa = 101.325f * BoostRatio;
+    Sample.ManifoldPressure_kPa = ManifoldPressure_Pa * 0.001f;
 
 
     //--------------------------------------------------------------------------
@@ -64,8 +65,8 @@ void FTelemetryHelper::PopulateSample(
     const float Speed_ms = Rec.ν_magnitudeMs;
     Sample.Speed_kmh = Speed_ms * 3.6f;
     
-    Sample.ForwardSpeed_kmh = FVector::DotProduct(Rec.ν_linearMs, Rec.ê_longitudinal) * 3.6f;
-    Sample.LateralSpeed_kmh = FVector::DotProduct(Rec.ν_linearMs, Rec.ê_lateral) * 3.6f;
+    Sample.ForwardSpeed_kmh = Rec.ν_forwardMs * 3.6f;
+    Sample.LateralSpeed_kmh = Rec.ν_lateralMs * 3.6f;
     
     // Acceleration in G's
     Sample.Acceleration_G = Rec.α_g_longitudinal;
@@ -149,6 +150,9 @@ void FTelemetryHelper::PopulateSample(
         
         // Contact state
         Sample.Wheel_InContact[i] = AxleData.bIsInContact[i];
+
+        // Wheel position code (raw int8 from AxleData.WheelCodes[]) - for diff/grouping diagnosis
+        Sample.Wheel_Code[i] = static_cast<int32>(AxleData.WheelCodes[i]);
         
         // Suspension state
         Sample.Susp_Displacement_cm[i] = AxleData.SpringDisplacements[i];

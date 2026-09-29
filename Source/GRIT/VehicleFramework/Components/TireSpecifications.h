@@ -1,6 +1,9 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/Texture2D.h"
+#include "Materials/MaterialInterface.h"
 #include "TireSpecifications.generated.h"  // ✓ ADD THIS - must be last
 
 /*====================================================================================================================================================
@@ -100,6 +103,9 @@ struct FTireStructuralProperties
     float TensileSidewallStrength_Pa = 8.0e6f;  // [Pa] - Sidewall rupture stress (8 MPa)
     float TensileTreadStrength_Pa = 12.0e6f;    // [Pa] - Tread delamination stress (12 MPa)
     float PressureStiffnessGain = 0.15f;        // [Pa⁻¹] - Contact patch stiffness per pressure
+    float SidewallDampingCoeff_NsPerM = 850.0f; // [N·s·m⁻¹] - Carcass normal-axis damping at nominal P
+    float SidewallElasticity_N_per_m = 220000.0f; // [N·m⁻¹] - Sidewall radial spring rate
+    float BeadLockPaddingCm = 1.5f;             // [cm] - Visual rim seat that must not deform
 };
 
 //------------------------------------------------------------------------------
@@ -570,6 +576,15 @@ struct FTireSpecSheet
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structural")
     float PressureStiffnessGain = 0.15f; // [Pa⁻¹] - Contact patch stiffness per pressure
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structural")
+    float SidewallDampingCoeff_NsPerM = 850.0f; // [N·s·m⁻¹] - Carcass normal-axis damping at nominal P
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structural")
+    float SidewallElasticity_N_per_m = 220000.0f; // [N·m⁻¹] - Sidewall radial spring rate
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Structural")
+    float BeadLockPaddingCm = 1.5f; // [cm] - Visual rim seat preserved from deformation
+
     //--------------------------------------------------------------------------
     // WEAR PROPERTIES
     //--------------------------------------------------------------------------
@@ -877,6 +892,22 @@ struct FTireSpecSheet
     
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Pacejka|CombinedSlip|Lateral")
     float rVy6 = 0.0f; // [rad⁻¹] - Vertical shift Kyα camber sensitivity
+
+    //--------------------------------------------------------------------------
+    // VISUAL ASSETS (used by ATireConstruct → AVehicleSolver visual proxy)
+    //--------------------------------------------------------------------------
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual")
+    TSoftObjectPtr<UStaticMesh> TireMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual")
+    TSoftObjectPtr<UStaticMesh> MagsMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual")
+    TSoftObjectPtr<UMaterialInterface> BaseRubberMaterial;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Visual")
+    TSoftObjectPtr<UTexture2D> WornRubberAlphaTexture;
 };
 
 
@@ -921,6 +952,9 @@ inline FTireSpecification& FTireSpecification::operator=(const FTireSpecSheet& S
     Structural.TensileSidewallStrength_Pa = Sheet.TensileSidewallStrength_Pa;
     Structural.TensileTreadStrength_Pa = Sheet.TensileTreadStrength_Pa;
     Structural.PressureStiffnessGain = Sheet.PressureStiffnessGain;
+    Structural.SidewallDampingCoeff_NsPerM = Sheet.SidewallDampingCoeff_NsPerM;
+    Structural.SidewallElasticity_N_per_m = Sheet.SidewallElasticity_N_per_m;
+    Structural.BeadLockPaddingCm = Sheet.BeadLockPaddingCm;
 
     // Wear
     Wear.InitialTreadDepth_mm = Sheet.InitialTreadDepth_mm;

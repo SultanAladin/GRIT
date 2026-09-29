@@ -6,6 +6,7 @@
 #include "Components/VerticalBoxSlot.h"
 #include "Components/SizeBoxSlot.h"
 #include "Components/SlateWrapperTypes.h"
+#include "../../../UserInterface/Components/ThemeUtil.h"
 
 // FORCE REBUILD: Fixed all BlendCurve issues - 2024-12-24 v3
 
@@ -34,6 +35,9 @@ void UGenericTray::NativeConstruct()
         TriggerButton->OnClicked.AddDynamic(this, &UGenericTray::OnTriggerPressed);
     }
 
+    // Reason: Apply theme-based border styling
+    ApplyBorderStyling();
+
     // FIXED: Apply safe fallback size immediately to prevent invisible button
     ApplyCollapsedSize();
     
@@ -44,12 +48,13 @@ void UGenericTray::NativeConstruct()
     // Cache dimensions now that layout is complete
     CacheDimensions();
     
-    // Apply the cached dimensions
+    // Apply the cached dimensions with proper padding calculation
     if (bDimensionsCached && ContentBox)
     {
-        ContentBox->SetHeightOverride(CachedButtonHeight);
-        ContentBox->SetWidthOverride(CachedButtonWidth);
-        UE_LOG(LogTemp, Warning, TEXT("[GenericTray] ✅ Applied cached dimensions: %.1fx%.1f px"), CachedButtonWidth, CachedButtonHeight);
+        FVector2D CollapsedSize = CalculateCollapsedSize();
+        ContentBox->SetHeightOverride(CollapsedSize.Y);
+        ContentBox->SetWidthOverride(CollapsedSize.X);
+        UE_LOG(LogTemp, Warning, TEXT("[GenericTray] ✅ Applied cached dimensions: %.1fx%.1f px"), CollapsedSize.X, CollapsedSize.Y);
     }
 }
 
@@ -145,6 +150,17 @@ void UGenericTray::DriveMotion(float DeltaTime)
     }
 
     //------------------------------------------------------------------------------
+    // Animate Corner Radius
+    //------------------------------------------------------------------------------
+    float ExpandedRadius = GetRadiusFromEnum(ExpandedCornerRadius);
+    float CollapsedRadius = GetRadiusFromEnum(CollapsedCornerRadius);
+    float CurrentRadius = bIsOpen ? 
+        FMath::Lerp(CollapsedRadius, ExpandedRadius, Eased) : 
+        FMath::Lerp(ExpandedRadius, CollapsedRadius, Eased);
+    
+    ApplyBorderStyling(CurrentRadius);
+
+    //------------------------------------------------------------------------------
     // End Animation
     //------------------------------------------------------------------------------
     if (Progress >= 1.0f)
@@ -156,6 +172,9 @@ void UGenericTray::DriveMotion(float DeltaTime)
             ContentBox->SetHeightOverride(TargetAnimHeight);
             ContentBox->SetWidthOverride(TargetAnimWidth);
         }
+        
+        // Apply final border styling
+        ApplyBorderStyling();
         
         UE_LOG(LogTemp, Log, TEXT("[GenericTray] Animation complete - Final size: %.1fx%.1f px"), TargetAnimWidth, TargetAnimHeight);
     }
@@ -173,7 +192,7 @@ void UGenericTray::CacheDimensions()
     bool bContentSizeValid = false;
 
     //------------------------------------------------------------------------------
-    // Measure Button Dimensions (Collapsed State)
+    // Measure Button Dimensions (Collapsed State) - Account for padding properly
     //------------------------------------------------------------------------------
     if (TriggerButton && bAutoSizeFromButton)
     {
@@ -181,11 +200,42 @@ void UGenericTray::CacheDimensions()
         
         if (ButtonSize.Y > 1.0f && ButtonSize.X > 1.0f)
         {
-            CachedButtonHeight = ButtonSize.Y + Margin.Y;
-            CachedButtonWidth = ButtonSize.X + Margin.X;
+            if (bAccountForPadding)
+            {
+                // Reason: Get button's actual content size without padding
+                FVector2D ContentSize = ButtonSize;
+                
+                // Reason: Account for button's internal padding
+                if (UButton* Button = TriggerButton)
+                {
+                    FButtonStyle ButtonStyle = Button->GetStyle();
+                    FMargin ButtonPadding = ButtonStyle.NormalPadding;
+                    ContentSize.X -= (ButtonPadding.Left + ButtonPadding.Right);
+                    ContentSize.Y -= (ButtonPadding.Top + ButtonPadding.Bottom);
+                }
+                
+                // Reason: For circular collapsed state, use the larger dimension to ensure perfect circle
+                if (bMaintainAspectRatio && CollapsedCornerRadius == ECornerRadius::Full)
+                {
+                    float MaxDimension = FMath::Max(ContentSize.X, ContentSize.Y);
+                    CachedButtonHeight = MaxDimension + Margin.Y + (BorderThickness * 2.0f);
+                    CachedButtonWidth = MaxDimension + Margin.X + (BorderThickness * 2.0f);
+                }
+                else
+                {
+                    CachedButtonHeight = ContentSize.Y + Margin.Y + (BorderThickness * 2.0f);
+                    CachedButtonWidth = ContentSize.X + Margin.X + (BorderThickness * 2.0f);
+                }
+            }
+            else
+            {
+                CachedButtonHeight = ButtonSize.Y + Margin.Y;
+                CachedButtonWidth = ButtonSize.X + Margin.X;
+            }
+            
             bButtonSizeValid = true;
-            UE_LOG(LogTemp, Warning, TEXT("[CacheDimensions] ✅ Button Size: %.1fx%.1f px + Margin: %.1fx%.1f px = %.1fx%.1f px"), 
-                   ButtonSize.X, ButtonSize.Y, Margin.X, Margin.Y, CachedButtonWidth, CachedButtonHeight);
+            UE_LOG(LogTemp, Warning, TEXT("[CacheDimensions] ✅ Button Size: %.1fx%.1f px + Margin: %.1fx%.1f px + Border: %.1f px = %.1fx%.1f px"), 
+                   ButtonSize.X, ButtonSize.Y, Margin.X, Margin.Y, BorderThickness, CachedButtonWidth, CachedButtonHeight);
         }
         else
         {
@@ -195,8 +245,17 @@ void UGenericTray::CacheDimensions()
     
     if (!bButtonSizeValid)
     {
-        CachedButtonHeight = 40.0f + Margin.Y;
-        CachedButtonWidth = 100.0f + Margin.X;
+        float BaseSize = 40.0f;
+        if (bMaintainAspectRatio && CollapsedCornerRadius == ECornerRadius::Full)
+        {
+            CachedButtonHeight = BaseSize + Margin.Y + (BorderThickness * 2.0f);
+            CachedButtonWidth = BaseSize + Margin.X + (BorderThickness * 2.0f);
+        }
+        else
+        {
+            CachedButtonHeight = BaseSize + Margin.Y;
+            CachedButtonWidth = 100.0f + Margin.X;
+        }
         UE_LOG(LogTemp, Warning, TEXT("[CacheDimensions] Using manual button size: %.1fx%.1f px"), CachedButtonWidth, CachedButtonHeight);
         bButtonSizeValid = true;
     }
@@ -241,9 +300,53 @@ void UGenericTray::ApplyCollapsedSize()
 {
     if (!ContentBox) return;
 
-    // FIXED: Always start with reasonable fallback to prevent 0x0 invisible button
-    float InitialWidth = 120.0f;   // [px] - Safe default button width
-    float InitialHeight = 48.0f;   // [px] - Safe default button height
+    // Reason: Use the new calculation method that accounts for padding
+    FVector2D CollapsedSize = CalculateCollapsedSize();
+    
+    // ALWAYS apply a valid size to prevent invisible button
+    ContentBox->SetHeightOverride(CollapsedSize.Y);
+    ContentBox->SetWidthOverride(CollapsedSize.X);
+    
+    UE_LOG(LogTemp, Warning, TEXT("[ApplyCollapsedSize] ✅ APPLIED INITIAL SIZE: %.1fx%.1f px (accounts for padding and borders)"), CollapsedSize.X, CollapsedSize.Y);
+}
+
+float UGenericTray::GetRadiusFromEnum(ECornerRadius Radius) const
+{
+    FBorderSpec BorderSpec = UThemeUtil::FetchBorderSpec(this);
+    
+    switch (Radius)
+    {
+        case ECornerRadius::None:   return BorderSpec.RadiusNone;
+        case ECornerRadius::Tight:  return BorderSpec.RadiusTight;
+        case ECornerRadius::Snug:   return BorderSpec.RadiusSnug;
+        case ECornerRadius::Loose:  return BorderSpec.RadiusLoose;
+        case ECornerRadius::Round:  return BorderSpec.RadiusRound;
+        case ECornerRadius::Full:   return BorderSpec.RadiusFull;
+        default:                    return BorderSpec.RadiusSnug;
+    } // End switch (Radius)
+}
+
+void UGenericTray::ApplyBorderStyling(float RadiusOverride)
+{
+    if (!Border) return;
+
+    float CurrentRadius;
+    if (RadiusOverride >= 0.0f)
+    {
+        CurrentRadius = RadiusOverride;
+    }
+    else
+    {
+        CurrentRadius = bIsOpen ? GetRadiusFromEnum(ExpandedCornerRadius) : GetRadiusFromEnum(CollapsedCornerRadius);
+    }
+
+    UThemeUtil::ApplyBorderStyling(Border, BackgroundColor, CurrentRadius, BorderThickness);
+}
+
+FVector2D UGenericTray::CalculateCollapsedSize() const
+{
+    // FIXED: Safe default size to prevent invisible button
+    FVector2D CollapsedSize(120.0f, 48.0f);
 
     // Try to get actual button size if available
     if (bAutoSizeFromButton && TriggerButton)
@@ -251,24 +354,50 @@ void UGenericTray::ApplyCollapsedSize()
         FVector2D ButtonSize = TriggerButton->GetDesiredSize();
         if (ButtonSize.Y > 1.0f && ButtonSize.X > 1.0f)  // Check for valid size
         {
-            InitialWidth = ButtonSize.X + Margin.X;
-            InitialHeight = ButtonSize.Y + Margin.Y;
+            if (bAccountForPadding)
+            {
+                // Reason: Get button's actual content size without internal padding
+                FVector2D ContentSize = ButtonSize;
+                
+                // Reason: Account for button's internal padding
+                if (UButton* Button = TriggerButton)
+                {
+                    FButtonStyle ButtonStyle = Button->GetStyle();
+                    FMargin ButtonPadding = ButtonStyle.NormalPadding;
+                    ContentSize.X -= (ButtonPadding.Left + ButtonPadding.Right);
+                    ContentSize.Y -= (ButtonPadding.Top + ButtonPadding.Bottom);
+                }
+                
+                // Reason: For circular collapsed state, use the larger dimension to ensure perfect circle
+                if (bMaintainAspectRatio && CollapsedCornerRadius == ECornerRadius::Full)
+                {
+                    float MaxDimension = FMath::Max(ContentSize.X, ContentSize.Y);
+                    CollapsedSize.X = MaxDimension + Margin.X + (BorderThickness * 2.0f);
+                    CollapsedSize.Y = MaxDimension + Margin.Y + (BorderThickness * 2.0f);
+                }
+                else
+                {
+                    CollapsedSize.X = ContentSize.X + Margin.X + (BorderThickness * 2.0f);
+                    CollapsedSize.Y = ContentSize.Y + Margin.Y + (BorderThickness * 2.0f);
+                }
+            }
+            else
+            {
+                CollapsedSize.X = ButtonSize.X + Margin.X;
+                CollapsedSize.Y = ButtonSize.Y + Margin.Y;
+            }
             
-            UE_LOG(LogTemp, Warning, TEXT("[ApplyCollapsedSize] ✅ Applied button-based size: %.1fx%.1f px"), InitialWidth, InitialHeight);
+            UE_LOG(LogTemp, Warning, TEXT("[CalculateCollapsedSize] ✅ Button-based size: %.1fx%.1f px"), CollapsedSize.X, CollapsedSize.Y);
         }
         else
         {
-            UE_LOG(LogTemp, Warning, TEXT("[ApplyCollapsedSize] ❌ Button size invalid (%.1fx%.1f px) - using safe fallback"), ButtonSize.X, ButtonSize.Y);
+            UE_LOG(LogTemp, Warning, TEXT("[CalculateCollapsedSize] ❌ Button size invalid (%.1fx%.1f px) - using safe fallback"), ButtonSize.X, ButtonSize.Y);
         }
     }
     else
     {
-        UE_LOG(LogTemp, Warning, TEXT("[ApplyCollapsedSize] Using manual fallback size: %.1fx%.1f px"), InitialWidth, InitialHeight);
+        UE_LOG(LogTemp, Warning, TEXT("[CalculateCollapsedSize] Using manual fallback size: %.1fx%.1f px"), CollapsedSize.X, CollapsedSize.Y);
     }
     
-    // ALWAYS apply a valid size to prevent invisible button
-    ContentBox->SetHeightOverride(InitialHeight);
-    ContentBox->SetWidthOverride(InitialWidth);
-    
-    UE_LOG(LogTemp, Warning, TEXT("[ApplyCollapsedSize] ✅ APPLIED INITIAL SIZE: %.1fx%.1f px (prevents 0x0 issue)"), InitialWidth, InitialHeight);
+    return CollapsedSize;
 }

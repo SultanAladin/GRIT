@@ -128,8 +128,6 @@ void AViewportNavigator::Tick(float DeltaTime)
     if (!EnsureRequiredComponentsExist())
         return;
 
-    UpdateDistanceMeasurements();
-
     if (bIsTransitioningToAnchor) // Reason: anchor transition takes priority
     {
         UpdateAnchorTransition(DeltaTime);
@@ -169,7 +167,6 @@ void AViewportNavigator::InitializeCamera()
         bFirstRun = false;
     } // End if (arm valid)
 
-    UpdateDistanceMeasurements();
 } // End InitializeCamera()
 
 //------------------------------------------------------------------------------
@@ -257,14 +254,14 @@ void AViewportNavigator::ProcessPanInput(const FVector2D& MovementVector)
 //------------------------------------------------------------------------------
 void AViewportNavigator::UpdateCameraOrbiting(float DeltaTime)
 {
-    if (!Arm || !Cam)
+    if (!Arm || !Cam || !GetWorld())
         return;
 
     const float OriginalTargetPitch = TargetPitch;
     const float OriginalTargetYaw = TargetYaw;
 
     //--------------------------------------------------------------------------
-    // Anti-tunneling: Clamp max movement per frame
+    // Clamp max movement per frame
     //--------------------------------------------------------------------------
     constexpr float MaxPitchDeltaPerFrame = 8.0f;                             // [deg]
     constexpr float MaxYawDeltaPerFrame = 15.0f;                              // [deg]
@@ -272,96 +269,48 @@ void AViewportNavigator::UpdateCameraOrbiting(float DeltaTime)
     float PitchDelta = FMath::Clamp(TargetPitch - CurrentPitch, -MaxPitchDeltaPerFrame, MaxPitchDeltaPerFrame);
     float YawDelta = FMath::Clamp(TargetYaw - CurrentYaw, -MaxYawDeltaPerFrame, MaxYawDeltaPerFrame);
 
-    //--------------------------------------------------------------------------
-    // Velocity-scaled lookahead: faster movement = further trace
-    //--------------------------------------------------------------------------
-    const float AngularSpeed = FMath::Abs(PitchDelta) + FMath::Abs(YawDelta); // [deg/frame]
-    const float SpeedMultiplier = FMath::Clamp(AngularSpeed * 0.1f, 1.0f, 5.0f);
-    const float TraceDistance = OrbitalSafetyDistance * 4.0f * SpeedMultiplier;
-
-    // Precompute inverse for damper calculations (avoid division)
-    const float ProximityThreshold = OrbitalSafetyDistance * 3.0f;
-    const float InvProximityThreshold = 1.0f / FMath::Max(ProximityThreshold, 1.0f);
+    const FVector Origin = Arm->GetComponentLocation() + Arm->TargetOffset;
+    const float ArmLen = Arm->TargetArmLength;
 
     //--------------------------------------------------------------------------
-    // Determine movement direction flags for adaptive cone traces
+    // Recovery: if current position overlaps geometry, snap to safe default
     //--------------------------------------------------------------------------
-    const bool bMovingRight = YawDelta > 0.1f;
-    const bool bMovingLeft = YawDelta < -0.1f;
-    const bool bMovingDown = PitchDelta > 0.1f;
-    const bool bMovingUp = PitchDelta < -0.1f;
-
-    //--------------------------------------------------------------------------
-    // Ground avoidance when pitching down (positive pitch = looking down)
-    //--------------------------------------------------------------------------
-    if (bMovingDown) // Reason: only trace when moving toward ground
+    if (IsCameraOverlapping(Origin, CurrentPitch, CurrentYaw, ArmLen))
     {
-        const float DownDist = GetAdaptiveConeTrace(FVector(0.0f, 0.0f, -1.0f), TraceDistance, TraceConeAngle,
-                                                     bMovingRight, bMovingLeft, false, true);
-
-        if (DownDist < ProximityThreshold)
-        {
-            // Suspension damping: closer = stronger resistance (using multiplication)
-            const float Penetration = FMath::Max(0.0f, ProximityThreshold - DownDist);
-            const float DamperStrength = FMath::Square(Penetration * InvProximityThreshold); // [0-1] quadratic
-            PitchDelta *= (1.0f - DamperStrength);
-
-            // Hard stop at minimum distance
-            if (DownDist < OrbitalSafetyDistance)
-            {
-                PitchDelta = 0.0f;
-            } // End if (hard stop)
-        } // End if (within threshold)
-    } // End if (pitching down)
+        CurrentPitch = -10.0f;
+        CurrentYaw = TargetYaw;
+        TargetPitch = CurrentPitch;
+        Arm->SetRelativeRotation(FRotator(CurrentPitch, CurrentYaw, 0.0f));
+        return;
+    }
 
     //--------------------------------------------------------------------------
-    // Sky/ceiling avoidance when pitching up (negative pitch = looking up)
+    // Independent axis validation (sphere sweep)
     //--------------------------------------------------------------------------
-    if (bMovingUp)
+    if (FMath::Abs(PitchDelta) > 0.01f)
     {
-        const float UpDist = GetAdaptiveConeTrace(FVector(0.0f, 0.0f, 1.0f), TraceDistance, TraceConeAngle,
-                                                   bMovingRight, bMovingLeft, true, false);
+        if (!IsCameraPositionClear(Origin, CurrentPitch + PitchDelta, CurrentYaw, ArmLen))
+            PitchDelta = 0.0f;
+    }
 
-        if (UpDist < ProximityThreshold)
+    if (FMath::Abs(YawDelta) > 0.01f)
+    {
+        if (!IsCameraPositionClear(Origin, CurrentPitch, CurrentYaw + YawDelta, ArmLen))
+            YawDelta = 0.0f;
+    }
+
+    // Combined validation (catches diagonal into concave corners)
+    if (FMath::Abs(PitchDelta) > 0.01f && FMath::Abs(YawDelta) > 0.01f)
+    {
+        if (!IsCameraPositionClear(Origin, CurrentPitch + PitchDelta, CurrentYaw + YawDelta, ArmLen))
         {
-            const float Penetration = FMath::Max(0.0f, ProximityThreshold - UpDist);
-            const float DamperStrength = FMath::Square(Penetration * InvProximityThreshold);
-            PitchDelta *= (1.0f - DamperStrength);
-
-            if (UpDist < OrbitalSafetyDistance)
-            {
-                PitchDelta = 0.0f;
-            }
+            PitchDelta = 0.0f;
+            YawDelta = 0.0f;
         }
-    } // End if (pitching up)
+    }
 
     //--------------------------------------------------------------------------
-    // Side collision when yawing
-    //--------------------------------------------------------------------------
-    if (bMovingRight || bMovingLeft)
-    {
-        const FVector YawDir = bMovingRight ? Cam->GetRightVector() : -Cam->GetRightVector();
-        const float SideProximity = OrbitalSafetyDistance * 2.0f;
-        const float InvSideProximity = 1.0f / FMath::Max(SideProximity, 1.0f);
-
-        const float SideDist = GetAdaptiveConeTrace(YawDir, TraceDistance, TraceConeAngle,
-                                                     bMovingRight, bMovingLeft, bMovingUp, bMovingDown);
-
-        if (SideDist < SideProximity)
-        {
-            const float Penetration = FMath::Max(0.0f, SideProximity - SideDist);
-            const float DamperStrength = FMath::Square(Penetration * InvSideProximity);
-            YawDelta *= (1.0f - DamperStrength);
-
-            if (SideDist < OrbitalSafetyDistance * 0.5f)
-            {
-                YawDelta = 0.0f;
-            }
-        }
-    } // End if (yawing)
-
-    //--------------------------------------------------------------------------
-    // Apply damped deltas and smooth interpolation
+    // Apply validated deltas with smooth interpolation
     //--------------------------------------------------------------------------
     const float DampedTargetPitch = CurrentPitch + PitchDelta;
     const float DampedTargetYaw = CurrentYaw + YawDelta;
@@ -376,72 +325,34 @@ void AViewportNavigator::UpdateCameraOrbiting(float DeltaTime)
     TargetYaw = OriginalTargetYaw;
 } // End UpdateCameraOrbiting()
 
-//------------------------------------------------------------------------------
-//                          RESTRICT ZOOM BY DISTANCE (Suspension-style)
-//------------------------------------------------------------------------------
-float AViewportNavigator::RestrictZoomByDistance(float CurrentLength, float DesiredLength, float Distance)
-{
-    const float ProximityThreshold = CollisionSafetyThreshold * ProximityMultiplier + ProximityBuffer;
 
-    if (Distance >= ProximityThreshold)
-        return DesiredLength;
 
-    // Precompute inverse to avoid division in damper calculation
-    const float InvProximityThreshold = 1.0f / FMath::Max(ProximityThreshold, 1.0f);
-
-    // Suspension damping: closer = stronger resistance (using multiplication)
-    const float Penetration = FMath::Max(0.0f, ProximityThreshold - Distance);
-    const float DamperStrength = FMath::Square(Penetration * InvProximityThreshold); // [0-1] quadratic
-
-    // Hard stop at minimum distance
-    if (Distance < CollisionSafetyThreshold)
-        return CurrentLength;
-
-    // Damped zoom delta
-    const float ZoomDelta = DesiredLength - CurrentLength;
-    return CurrentLength + ZoomDelta * (1.0f - DamperStrength);
-} // End RestrictZoomByDistance()
 
 //------------------------------------------------------------------------------
 //                          UPDATE CAMERA ZOOMING
 //------------------------------------------------------------------------------
 void AViewportNavigator::UpdateCameraZooming(float DeltaTime)
 {
-    if (!Arm || !Cam)
+    if (!Arm || !Cam || !GetWorld())
         return;
 
     const float CurrentArmLength = Arm->TargetArmLength;
     float DesiredArmLength = TargetArmLength;
 
     //--------------------------------------------------------------------------
-    // Anti-tunneling: Clamp max zoom delta per frame
+    // Clamp max zoom delta per frame
     //--------------------------------------------------------------------------
     constexpr float MaxZoomDeltaPerFrame = 100.0f;                            // [cm]
     float ZoomDelta = FMath::Clamp(DesiredArmLength - CurrentArmLength, -MaxZoomDeltaPerFrame, MaxZoomDeltaPerFrame);
     DesiredArmLength = CurrentArmLength + ZoomDelta;
 
     //--------------------------------------------------------------------------
-    // Velocity-scaled lookahead: faster zoom = further trace
+    // Validate proposed zoom position with sphere sweep
     //--------------------------------------------------------------------------
-    const float ZoomVelocity = FMath::Abs(ZoomDelta);                         // [cm/frame]
-    const float SpeedMultiplier = FMath::Clamp(ZoomVelocity * 0.02f, 1.0f, 5.0f);
-    const float TraceDistance = CollisionSafetyThreshold * 5.0f * SpeedMultiplier;
+    const FVector Origin = Arm->GetComponentLocation() + Arm->TargetOffset;
 
-    // Only trace in direction of zoom movement
-    if (ZoomDelta < -1.0f) // Reason: zooming IN (toward vehicle)
-    {
-        // Adaptive cone trace forward (camera looks at vehicle)
-        const float ForwardDist = GetAdaptiveConeTrace(Cam->GetForwardVector(), TraceDistance, TraceConeAngle,
-                                                        true, true, true, true); // All quadrants when zooming
-        DesiredArmLength = RestrictZoomByDistance(CurrentArmLength, DesiredArmLength, ForwardDist);
-    }
-    else if (ZoomDelta > 1.0f) // Reason: zooming OUT (away from vehicle)
-    {
-        // Adaptive cone trace backward (away from vehicle)
-        const float BackwardDist = GetAdaptiveConeTrace(-Cam->GetForwardVector(), TraceDistance, TraceConeAngle,
-                                                         true, true, true, true); // All quadrants when zooming
-        DesiredArmLength = RestrictZoomByDistance(CurrentArmLength, DesiredArmLength, BackwardDist);
-    }
+    if (!IsCameraPositionClear(Origin, CurrentPitch, CurrentYaw, DesiredArmLength))
+        DesiredArmLength = CurrentArmLength;
 
     TargetArmLength = DesiredArmLength;
     Arm->TargetArmLength = FMath::FInterpTo(CurrentArmLength, TargetArmLength, DeltaTime, CameraLagSpeed);
@@ -452,7 +363,7 @@ void AViewportNavigator::UpdateCameraZooming(float DeltaTime)
 //------------------------------------------------------------------------------
 void AViewportNavigator::UpdateCameraPanning(float DeltaTime)
 {
-    if (!Arm || !Cam)
+    if (!Arm || !Cam || !GetWorld())
         return;
 
     //--------------------------------------------------------------------------
@@ -467,77 +378,58 @@ void AViewportNavigator::UpdateCameraPanning(float DeltaTime)
     CamRight.Z = 0.0f;
     CamRight.Normalize();
 
-    const float PanSpeed = PanSensitivity * 50.0f;                            // [cm/s] - Scale for reasonable speed
-    const float PanSafetyDist = CollisionSafetyThreshold;                     // [cm] - Collision buffer
-
-    // Precompute inverse for damper calculations (avoid division)
-    const float ProximityThreshold = PanSafetyDist * 3.0f;
-    const float InvProximityThreshold = 1.0f / FMath::Max(ProximityThreshold, 1.0f);
+    const float PanSpeed = PanSensitivity * 50.0f;                            // [cm/s]
 
     //--------------------------------------------------------------------------
-    // Determine movement direction flags for adaptive cone traces
+    // Compute proposed offsets
     //--------------------------------------------------------------------------
-    const bool bMovingRight = CurrentPanInput.X > 0.01f;
-    const bool bMovingLeft = CurrentPanInput.X < -0.01f;
-    const bool bMovingUp = CurrentPanInput.Y > 0.01f;
-    const bool bMovingDown = CurrentPanInput.Y < -0.01f;
+    FVector ProposedTargetOffset = TargetTargetOffset;
+    FVector ProposedSocketOffset = TargetSocketOffset;
 
-    //--------------------------------------------------------------------------
-    // Horizontal pan with directional collision (cone trace)
-    //--------------------------------------------------------------------------
-    if (bMovingRight || bMovingLeft)
-    {
-        const FVector PanDir = bMovingRight ? CamRight : -CamRight;
-        const float SideDist = GetAdaptiveConeTrace(PanDir, PanSafetyDist * 4.0f, TraceConeAngle,
-                                                     bMovingRight, bMovingLeft, bMovingUp, bMovingDown);
+    if (FMath::Abs(CurrentPanInput.X) > 0.01f)
+        ProposedTargetOffset += CamRight * CurrentPanInput.X * DeltaTime * PanSpeed;
 
-        float PanMultiplier = 1.0f;
-        if (SideDist < ProximityThreshold)
-        {
-            // Suspension damping (using multiplication)
-            const float Penetration = FMath::Max(0.0f, ProximityThreshold - SideDist);
-            PanMultiplier = 1.0f - FMath::Square(Penetration * InvProximityThreshold);
-
-            // Hard stop
-            if (SideDist < PanSafetyDist)
-                PanMultiplier = 0.0f;
-        }
-
-        TargetTargetOffset += CamRight * CurrentPanInput.X * DeltaTime * PanSpeed * PanMultiplier;
-    }
-
-    //--------------------------------------------------------------------------
-    // Vertical pan with directional collision (cone trace)
-    //--------------------------------------------------------------------------
-    if (bMovingUp || bMovingDown)
-    {
-        const FVector VertDir = bMovingUp ? FVector::UpVector : FVector::DownVector;
-        const float VertDist = GetAdaptiveConeTrace(VertDir, PanSafetyDist * 4.0f, TraceConeAngle,
-                                                     bMovingRight, bMovingLeft, bMovingUp, bMovingDown);
-
-        float PanMultiplier = 1.0f;
-        if (VertDist < ProximityThreshold)
-        {
-            const float Penetration = FMath::Max(0.0f, ProximityThreshold - VertDist);
-            PanMultiplier = 1.0f - FMath::Square(Penetration * InvProximityThreshold);
-
-            if (VertDist < PanSafetyDist)
-                PanMultiplier = 0.0f;
-        }
-
-        TargetSocketOffset.Z += CurrentPanInput.Y * DeltaTime * PanSpeed * PanMultiplier;
-    }
+    if (FMath::Abs(CurrentPanInput.Y) > 0.01f)
+        ProposedSocketOffset.Z += CurrentPanInput.Y * DeltaTime * PanSpeed;
 
     //--------------------------------------------------------------------------
     // Clamp offsets to reasonable bounds
     //--------------------------------------------------------------------------
     const float MinZ = InitialSocketOffset.Z + MinPanZ;
     const float MaxZ = InitialSocketOffset.Z + MaxPanZ;
-    TargetSocketOffset.Z = FMath::Clamp(TargetSocketOffset.Z, MinZ, MaxZ);
+    ProposedSocketOffset.Z = FMath::Clamp(ProposedSocketOffset.Z, MinZ, MaxZ);
 
     constexpr float MaxHorizontalPan = 300.0f;                                // [cm]
-    TargetTargetOffset.X = FMath::Clamp(TargetTargetOffset.X, -MaxHorizontalPan, MaxHorizontalPan);
-    TargetTargetOffset.Y = FMath::Clamp(TargetTargetOffset.Y, -MaxHorizontalPan, MaxHorizontalPan);
+    ProposedTargetOffset.X = FMath::Clamp(ProposedTargetOffset.X, -MaxHorizontalPan, MaxHorizontalPan);
+    ProposedTargetOffset.Y = FMath::Clamp(ProposedTargetOffset.Y, -MaxHorizontalPan, MaxHorizontalPan);
+
+    //--------------------------------------------------------------------------
+    // Validate proposed pan position with sphere sweep
+    //--------------------------------------------------------------------------
+    // Temporarily apply proposed offsets to compute where the camera would end up
+    const FVector OriginalTargetOffset = Arm->TargetOffset;
+    const FVector OriginalSocketOffset = Arm->SocketOffset;
+
+    // Test with proposed offsets: sweep from arm origin (with new TargetOffset) to camera
+    const FVector ProposedOrigin = Arm->GetComponentLocation() + ProposedTargetOffset;
+    const FRotator CamRot(CurrentPitch, CurrentYaw, 0.0f);
+    FVector ProposedCamPos = ProposedOrigin - CamRot.Vector() * Arm->TargetArmLength;
+    ProposedCamPos += FRotationMatrix(CamRot).TransformVector(ProposedSocketOffset);
+
+    FHitResult Hit;
+    FCollisionQueryParams Params(SCENE_QUERY_STAT(CameraPan), false);
+    if (Vehicle) Params.AddIgnoredActor(Vehicle);
+
+    const bool bBlocked = GetWorld()->SweepSingleByChannel(
+        Hit, ProposedOrigin, ProposedCamPos, FQuat::Identity,
+        ECC_Camera, FCollisionShape::MakeSphere(CameraProbeRadius), Params);
+
+    if (!bBlocked)
+    {
+        TargetTargetOffset = ProposedTargetOffset;
+        TargetSocketOffset = ProposedSocketOffset;
+    }
+    // If blocked, offsets stay at current values (hard reject)
 
     //--------------------------------------------------------------------------
     // Smooth interpolation to target offsets
@@ -570,107 +462,45 @@ bool AViewportNavigator::EnsureRequiredComponentsExist()
     return true;
 } // End EnsureRequiredComponentsExist()
 
-//------------------------------------------------------------------------------
-//                          GET ADAPTIVE CONE TRACE
-//------------------------------------------------------------------------------
-float AViewportNavigator::GetAdaptiveConeTrace(FVector Direction, float MaxDistance, float ConeAngleDeg,
-                                                bool bTraceRight, bool bTraceLeft, bool bTraceUp, bool bTraceDown)
+/*====================================================================================================================================
+                                                     COLLISION (Predictive Sphere Sweep)
+======================================================================================================================================*/
+
+FVector AViewportNavigator::ComputeCameraWorldPosition(float Pitch, float Yaw, float ArmLen) const
 {
-    if (!Cam || Direction.IsNearlyZero())
-        return MaxDistance;
+    const FVector Origin = Arm->GetComponentLocation() + Arm->TargetOffset;
+    const FRotator Rot(Pitch, Yaw, 0.0f);
+    FVector Pos = Origin - Rot.Vector() * ArmLen;
+    Pos += FRotationMatrix(Rot).TransformVector(Arm->SocketOffset);
+    return Pos;
+}
 
-    // Center ray always fires
-    float MinDist = GetTraceDistance(Cam, Direction, MaxDistance);
-
-    // Build orthonormal basis from direction
-    FVector Right = FVector::CrossProduct(Direction, FVector::UpVector);
-    if (Right.IsNearlyZero()) // Reason: direction is vertical, use forward as reference
-    {
-        Right = FVector::CrossProduct(Direction, FVector::ForwardVector);
-    }
-    Right.Normalize();
-
-    FVector Up = FVector::CrossProduct(Right, Direction);
-    Up.Normalize();
-
-    const float AngleRad = FMath::DegreesToRadians(ConeAngleDeg);
-    const float SinAngle = FMath::Sin(AngleRad);
-    const float CosAngle = FMath::Cos(AngleRad);
-
-    // Only fire corner rays in relevant quadrants based on movement direction
-    if (bTraceRight && bTraceUp) // Top-Right quadrant
-    {
-        FVector CornerDir = (Direction * CosAngle + (Right + Up) * SinAngle * 0.707f).GetSafeNormal();
-        MinDist = FMath::Min(MinDist, GetTraceDistance(Cam, CornerDir, MaxDistance));
-    }
-
-    if (bTraceRight && bTraceDown) // Bottom-Right quadrant
-    {
-        FVector CornerDir = (Direction * CosAngle + (Right - Up) * SinAngle * 0.707f).GetSafeNormal();
-        MinDist = FMath::Min(MinDist, GetTraceDistance(Cam, CornerDir, MaxDistance));
-    }
-
-    if (bTraceLeft && bTraceUp) // Top-Left quadrant
-    {
-        FVector CornerDir = (Direction * CosAngle + (-Right + Up) * SinAngle * 0.707f).GetSafeNormal();
-        MinDist = FMath::Min(MinDist, GetTraceDistance(Cam, CornerDir, MaxDistance));
-    }
-
-    if (bTraceLeft && bTraceDown) // Bottom-Left quadrant
-    {
-        FVector CornerDir = (Direction * CosAngle + (-Right - Up) * SinAngle * 0.707f).GetSafeNormal();
-        MinDist = FMath::Min(MinDist, GetTraceDistance(Cam, CornerDir, MaxDistance));
-    }
-
-    return MinDist;
-} // End GetAdaptiveConeTrace()
-
-//------------------------------------------------------------------------------
-//                          GET TRACE DISTANCE
-//------------------------------------------------------------------------------
-float AViewportNavigator::GetTraceDistance(UCameraComponent* Camera, FVector Direction, float MaxDistance)
+bool AViewportNavigator::IsCameraPositionClear(const FVector& Origin, float Pitch, float Yaw, float ArmLen) const
 {
-    if (!Camera || Direction.IsZero() || MaxDistance <= 0.0f || !GetWorld())
-        return MaxDistance;
+    const FVector ProposedPos = ComputeCameraWorldPosition(Pitch, Yaw, ArmLen);
 
-    Direction.Normalize();
+    FHitResult Hit;
+    FCollisionQueryParams Params(SCENE_QUERY_STAT(CameraOrbit), false);
+    if (Vehicle) Params.AddIgnoredActor(Vehicle);
 
-    FVector StartLocation = Camera->GetComponentLocation();
+    const bool bHit = GetWorld()->SweepSingleByChannel(
+        Hit, Origin, ProposedPos, FQuat::Identity,
+        ECC_Camera, FCollisionShape::MakeSphere(CameraProbeRadius), Params);
 
-    FHitResult HitResult;
-    FCollisionQueryParams CollisionParams;
-    CollisionParams.bTraceComplex = false;
-    CollisionParams.AddIgnoredActor(Camera->GetOwner());
-    if (Vehicle) CollisionParams.AddIgnoredActor(Vehicle);
+    return !bHit;
+}
 
-    FVector EndLocation = StartLocation + (Direction * MaxDistance);
-
-    bool bHit = GetWorld()->LineTraceSingleByChannel(HitResult, StartLocation, EndLocation, ECC_Visibility, CollisionParams);
-
-#if !UE_BUILD_SHIPPING
-    // Debug visualization
-    FColor TraceColor = bHit ? FColor::Red : FColor::Green;
-    DrawDebugLine(GetWorld(), StartLocation, bHit ? HitResult.ImpactPoint : EndLocation, TraceColor, false, -1.0f, 0, 1.0f);
-    if (bHit)
-    {
-        DrawDebugSphere(GetWorld(), HitResult.ImpactPoint, 5.0f, 8, FColor::Yellow, false, -1.0f, 0, 1.0f);
-    }
-#endif
-
-    if (bHit)
-        return FVector::Dist(StartLocation, HitResult.ImpactPoint);
-
-    return MaxDistance;
-} // End GetTraceDistance()
-
-//------------------------------------------------------------------------------
-//                          UPDATE DISTANCE MEASUREMENTS (On-Demand)
-//------------------------------------------------------------------------------
-void AViewportNavigator::UpdateDistanceMeasurements()
+bool AViewportNavigator::IsCameraOverlapping(const FVector& Origin, float Pitch, float Yaw, float ArmLen) const
 {
-    // Now only traces what's needed - called selectively by movement functions
-    // This function kept for compatibility but individual traces done on-demand
-} // End UpdateDistanceMeasurements()
+    const FVector CamPos = ComputeCameraWorldPosition(Pitch, Yaw, ArmLen);
+
+    FCollisionQueryParams Params(SCENE_QUERY_STAT(CameraOverlap), false);
+    if (Vehicle) Params.AddIgnoredActor(Vehicle);
+
+    return GetWorld()->OverlapBlockingTestByChannel(
+        CamPos, FQuat::Identity,
+        ECC_Camera, FCollisionShape::MakeSphere(CameraProbeRadius), Params);
+}
 
 //------------------------------------------------------------------------------
 //                          PROCESS CYCLE MODE
